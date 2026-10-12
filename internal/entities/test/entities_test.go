@@ -32,6 +32,8 @@ func TestAllIncludesCoreModels(t *testing.T) {
 		&UsageActivityStat{},
 		// Latency 小时/天数据共用一张聚合表。
 		&UsageLatencyStat{},
+		// API Key 用量页的 15 分钟预聚合。
+		&UsageAPIKeyTimeStat{},
 		&AuthSession{},
 		&AppSetting{},
 		// 通用额度历史按父周期、子百分比状态段顺序注册，确保全新数据库创建真实外键。

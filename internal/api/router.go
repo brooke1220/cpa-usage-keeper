@@ -61,6 +61,8 @@ type OptionalProviders struct {
 	RequestLogs        service.RequestLogProvider
 	Ranking            rankinghttpapi.Provider
 	LocalRanking       rankinghttpapi.LocalProvider
+	APIKeyTimeUsage    service.APIKeyTimeUsageProvider
+	WorkHours          WorkHoursProvider
 	Status             StatusRouteConfig
 }
 
@@ -107,6 +109,8 @@ func NewRouter(
 	var requestLogProvider service.RequestLogProvider
 	var rankingProvider rankinghttpapi.Provider
 	var localRankingProvider rankinghttpapi.LocalProvider
+	var apiKeyTimeUsageProvider service.APIKeyTimeUsageProvider
+	var workHoursProvider WorkHoursProvider
 	var statusConfig StatusRouteConfig
 	if len(optionalProviders) > 0 {
 		usageIdentityProvider = optionalProviders[0].UsageIdentity
@@ -119,6 +123,8 @@ func NewRouter(
 		requestLogProvider = optionalProviders[0].RequestLogs
 		rankingProvider = optionalProviders[0].Ranking
 		localRankingProvider = optionalProviders[0].LocalRanking
+		apiKeyTimeUsageProvider = optionalProviders[0].APIKeyTimeUsage
+		workHoursProvider = optionalProviders[0].WorkHours
 		statusConfig = optionalProviders[0].Status
 	}
 	authHandler.setCPAAPIKeyProvider(cpaAPIKeyProvider)
@@ -135,6 +141,8 @@ func NewRouter(
 	registerStatusRoutes(adminProtected, statusProvider, statusConfig)
 	registerUpdateRoutes(adminProtected, nil)
 	registerUsageOverviewRoute(adminProtected, usageProvider, cpaAPIKeyProvider)
+	registerAPIKeyTimeUsageRoute(adminProtected, apiKeyTimeUsageProvider)
+	registerWorkHoursRoutes(adminProtected, workHoursProvider)
 	registerUsageActivityRoute(adminProtected, usageProvider)
 	registerUsageAnalysisRoute(adminProtected, usageProvider, cpaAPIKeyProvider)
 	registerUsageEventsRoute(adminProtected, usageProvider, usageIdentityProvider, cpaAPIKeyProvider, requestLogProvider, requestLogDownloadTokens, statusConfig.CPARequestLogAccessEnabled)

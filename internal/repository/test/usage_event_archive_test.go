@@ -219,6 +219,7 @@ func seedArchiveCaughtUpCheckpoints(t *testing.T, db *gorm.DB, maxID int64, now 
 		{Name: entities.UsageAggregationCheckpointOverview, LastAggregatedUsageEventID: maxID, CreatedAt: now, UpdatedAt: now},
 		{Name: entities.UsageAggregationCheckpointActivity, LastAggregatedUsageEventID: maxID, CreatedAt: now, UpdatedAt: now},
 		{Name: entities.UsageAggregationCheckpointLatency, LastAggregatedUsageEventID: maxID, CreatedAt: now, UpdatedAt: now},
+		{Name: entities.UsageAggregationCheckpointAPIKeyTime, LastAggregatedUsageEventID: maxID, CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatalf("seed archive cleanup checkpoints: %v", err)

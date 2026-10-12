@@ -13,7 +13,15 @@ import (
 	"gorm.io/plugin/dbresolver"
 )
 
-// UsageAggregationCheckpointSnapshot 是一次 SELECT 得到的三个已提交全局水位快照。
+// usageAggregationCheckpointNames 是全部全局聚合水位；快照读取和归档门禁共用同一份名单。
+var usageAggregationCheckpointNames = []entities.UsageAggregationCheckpointName{
+	entities.UsageAggregationCheckpointOverview,
+	entities.UsageAggregationCheckpointActivity,
+	entities.UsageAggregationCheckpointLatency,
+	entities.UsageAggregationCheckpointAPIKeyTime,
+}
+
+// UsageAggregationCheckpointSnapshot 是一次 SELECT 得到的全部已提交全局水位快照。
 type UsageAggregationCheckpointSnapshot struct {
 	// OverviewCursor 只代表 Overview 独立事务已经提交的进度。
 	OverviewCursor int64
@@ -21,28 +29,34 @@ type UsageAggregationCheckpointSnapshot struct {
 	ActivityCursor int64
 	// LatencyCursor 只代表 Latency 独立事务已经提交的进度。
 	LatencyCursor int64
+	// APIKeyTimeCursor 只代表 API Key 用量 15 分钟预聚合已经提交的进度。
+	APIKeyTimeCursor int64
 }
 
-// Equal 只比较三个 cursor；时间戳不参与共享快路径判断。
+// Equal 只比较全部 cursor；时间戳不参与共享快路径判断。
 func (snapshot UsageAggregationCheckpointSnapshot) Equal() bool {
-	return snapshot.OverviewCursor == snapshot.ActivityCursor && snapshot.ActivityCursor == snapshot.LatencyCursor
+	return snapshot.OverviewCursor == snapshot.ActivityCursor &&
+		snapshot.ActivityCursor == snapshot.LatencyCursor &&
+		snapshot.LatencyCursor == snapshot.APIKeyTimeCursor
 }
 
-// LoadUsageAggregationCheckpointSnapshot 用一次 Reader 查询读取三个水位，缺行保持零值。
+// ReachedTarget 判断全部聚合是否都已追到 target。
+func (snapshot UsageAggregationCheckpointSnapshot) ReachedTarget(target int64) bool {
+	return snapshot.OverviewCursor >= target &&
+		snapshot.ActivityCursor >= target &&
+		snapshot.LatencyCursor >= target &&
+		snapshot.APIKeyTimeCursor >= target
+}
+
+// LoadUsageAggregationCheckpointSnapshot 用一次 Reader 查询读取全部水位，缺行保持零值。
 func LoadUsageAggregationCheckpointSnapshot(ctx context.Context, db *gorm.DB) (UsageAggregationCheckpointSnapshot, error) {
 	if db == nil {
 		return UsageAggregationCheckpointSnapshot{}, fmt.Errorf("database is nil")
 	}
-	// 固定名称集合防止调用方遗漏某一水位，也让 SQL 始终保持单次 IN 查询。
-	names := []entities.UsageAggregationCheckpointName{
-		entities.UsageAggregationCheckpointOverview,
-		entities.UsageAggregationCheckpointActivity,
-		entities.UsageAggregationCheckpointLatency,
-	}
 	// 只读路径不得 FirstOrCreate；缺失行由结构体零值表达首次聚合状态。
 	var checkpoints []entities.UsageAggregationCheckpoint
 	if err := db.Clauses(dbresolver.Read).WithContext(ctx).
-		Where("name IN ?", names).
+		Where("name IN ?", usageAggregationCheckpointNames).
 		Find(&checkpoints).Error; err != nil {
 		return UsageAggregationCheckpointSnapshot{}, fmt.Errorf("load usage aggregation checkpoints: %w", err)
 	}
@@ -56,6 +70,8 @@ func LoadUsageAggregationCheckpointSnapshot(ctx context.Context, db *gorm.DB) (U
 			snapshot.ActivityCursor = checkpoint.LastAggregatedUsageEventID
 		case entities.UsageAggregationCheckpointLatency:
 			snapshot.LatencyCursor = checkpoint.LastAggregatedUsageEventID
+		case entities.UsageAggregationCheckpointAPIKeyTime:
+			snapshot.APIKeyTimeCursor = checkpoint.LastAggregatedUsageEventID
 		}
 	}
 	return snapshot, nil
@@ -66,9 +82,9 @@ func AdvanceUsageAggregationCheckpoint(ctx context.Context, tx *gorm.DB, name en
 	if tx == nil {
 		return fmt.Errorf("database is nil")
 	}
-	// 只允许实体层声明的三种名称，避免 typo 静默创建第四类 checkpoint。
+	// 只允许实体层声明的名称，避免 typo 静默创建额外的 checkpoint。
 	switch name {
-	case entities.UsageAggregationCheckpointOverview, entities.UsageAggregationCheckpointActivity, entities.UsageAggregationCheckpointLatency:
+	case entities.UsageAggregationCheckpointOverview, entities.UsageAggregationCheckpointActivity, entities.UsageAggregationCheckpointLatency, entities.UsageAggregationCheckpointAPIKeyTime:
 	default:
 		return fmt.Errorf("unsupported usage aggregation checkpoint %q", name)
 	}

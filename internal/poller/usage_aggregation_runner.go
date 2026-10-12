@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/activity"
+	"cpa-usage-keeper/internal/apikeytime"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/latency"
 	"cpa-usage-keeper/internal/overview"
@@ -37,7 +38,7 @@ const (
 type UsageAggregationKind string
 
 const (
-	// UsageAggregationKindRollups 一次最多处理 Overview、Activity、Latency 各一页。
+	// UsageAggregationKindRollups 一次最多处理 Overview、Activity、Latency、API Key 用量各一页。
 	UsageAggregationKindRollups UsageAggregationKind = "rollups"
 	// UsageAggregationKindIdentity 沿用现有 Identity 分页和每行 cursor。
 	UsageAggregationKindIdentity UsageAggregationKind = "identity"
@@ -435,7 +436,7 @@ func (r *UsageAggregationRunner) runRollupsTurn(ctx context.Context, writeDB *go
 	if err != nil {
 		return false, false, false, err
 	}
-	if snapshot.OverviewCursor >= targetEventID && snapshot.ActivityCursor >= targetEventID && snapshot.LatencyCursor >= targetEventID {
+	if snapshot.ReachedTarget(targetEventID) {
 		return false, false, true, nil
 	}
 	if snapshot.Equal() {
@@ -453,13 +454,14 @@ func (r *UsageAggregationRunner) runSharedRollupsPage(ctx context.Context, write
 		return false, false, false, fmt.Errorf("shared usage aggregation page is empty before target %d from cursor %d", targetEventID, cursor)
 	}
 
-	// 三类纯计算复用同一份只读事件；各自错误只跳过自己，成功结果仍可用独立事务提交。
+	// 各类纯计算复用同一份只读事件；各自错误只跳过自己，成功结果仍可用独立事务提交。
 	overviewHourly, overviewDaily, nextCursor := overview.BuildRows(events)
 	activityRows, activityErr := activity.BuildRows(events, now)
 	latencyRows, latencyErr := latency.BuildRows(events, now)
+	apiKeyTimeRows := apikeytime.BuildRows(events, now)
 
 	processed := false
-	pageErrors := make([]error, 0, 3)
+	pageErrors := make([]error, 0, 4)
 	if deferred, err := r.deferForInbox(ctx, writeDB); err != nil || deferred {
 		if err != nil {
 			pageErrors = append(pageErrors, err)
@@ -493,6 +495,17 @@ func (r *UsageAggregationRunner) runSharedRollupsPage(ctx context.Context, write
 	if latencyErr != nil {
 		pageErrors = append(pageErrors, latencyErr)
 	} else if err := repository.ApplyUsageLatencyAggregationPage(ctx, writeDB, cursor, nextCursor, latencyRows, now); err != nil {
+		pageErrors = append(pageErrors, err)
+	} else {
+		processed = true
+	}
+	if deferred, err := r.deferForInbox(ctx, writeDB); err != nil || deferred {
+		if err != nil {
+			pageErrors = append(pageErrors, err)
+		}
+		return processed, deferred, false, errors.Join(pageErrors...)
+	}
+	if err := repository.ApplyUsageAPIKeyTimeAggregationPage(ctx, writeDB, cursor, nextCursor, apiKeyTimeRows, now); err != nil {
 		pageErrors = append(pageErrors, err)
 	} else {
 		processed = true
@@ -582,8 +595,30 @@ func (r *UsageAggregationRunner) runFallbackRollupsPages(ctx context.Context, wr
 			}
 		}
 	}
-	reached := snapshot.OverviewCursor >= targetEventID && snapshot.ActivityCursor >= targetEventID && snapshot.LatencyCursor >= targetEventID
-	return processed, false, reached, errors.Join(pageErrors...)
+	if snapshot.APIKeyTimeCursor < targetEventID {
+		events, err := repository.LoadUsageAggregationEventPage(ctx, r.db, snapshot.APIKeyTimeCursor, targetEventID, usageAggregationEventPageSize)
+		if err != nil {
+			pageErrors = append(pageErrors, err)
+		} else if len(events) == 0 {
+			pageErrors = append(pageErrors, fmt.Errorf("api key time fallback page is empty before target %d", targetEventID))
+		} else {
+			rows := apikeytime.BuildRows(events, now)
+			nextCursor := events[len(events)-1].ID
+			if deferred, deferErr := r.deferForInbox(ctx, writeDB); deferErr != nil || deferred {
+				if deferErr != nil {
+					pageErrors = append(pageErrors, deferErr)
+				}
+				return processed, deferred, false, errors.Join(pageErrors...)
+			}
+			if applyErr := repository.ApplyUsageAPIKeyTimeAggregationPage(ctx, writeDB, snapshot.APIKeyTimeCursor, nextCursor, rows, now); applyErr != nil {
+				pageErrors = append(pageErrors, applyErr)
+			} else {
+				snapshot.APIKeyTimeCursor = nextCursor
+				processed = true
+			}
+		}
+	}
+	return processed, false, snapshot.ReachedTarget(targetEventID), errors.Join(pageErrors...)
 }
 
 func (r *UsageAggregationRunner) deferForInbox(ctx context.Context, writeDB *gorm.DB) (bool, error) {

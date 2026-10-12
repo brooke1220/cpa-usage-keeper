@@ -117,18 +117,19 @@ func TestUsageLatencyStatsMigrationEnablesUsageEventArchive(t *testing.T) {
 	db := openUsageLatencyMigrationDatabaseAt(t, now)
 	prepareUsageLatencyMigrationDatabase(t, db, events)
 	// Cleanup 后续步骤依赖这些当前实体表；保持空表即可，不掺入其它业务数据。
-	if err := db.AutoMigrate(&entities.RedisUsageInbox{}, &entities.UsageActivityStat{}, &entities.UsageIdentity{}); err != nil {
+	if err := db.AutoMigrate(&entities.RedisUsageInbox{}, &entities.UsageActivityStat{}, &entities.UsageIdentity{}, &entities.UsageAPIKeyTimeStat{}); err != nil {
 		t.Fatalf("create cleanup support schema: %v", err)
 	}
 	if err := migration.Run(db); err != nil {
 		t.Fatalf("run latency migration before cleanup: %v", err)
 	}
-	// Overview/Activity 在真实升级中来自旧水位迁移；本用例固定它们已追平，只观察 Latency 门禁。
+	// Overview/Activity/API Key 用量在真实升级中由各自 migration 追平；本用例固定它们已追平，只观察 Latency 门禁。
 	if err := db.Create(&[]entities.UsageAggregationCheckpoint{
 		{Name: entities.UsageAggregationCheckpointOverview, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
 		{Name: entities.UsageAggregationCheckpointActivity, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
+		{Name: entities.UsageAggregationCheckpointAPIKeyTime, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
 	}).Error; err != nil {
-		t.Fatalf("seed caught-up overview/activity checkpoints: %v", err)
+		t.Fatalf("seed caught-up overview/activity/api key time checkpoints: %v", err)
 	}
 
 	result, err := repository.CleanupStorage(db, now, 0)

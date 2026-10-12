@@ -21,6 +21,7 @@ import (
 	"cpa-usage-keeper/internal/ranking"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
+	"cpa-usage-keeper/internal/workhours"
 	webui "cpa-usage-keeper/web"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -160,6 +161,30 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		// 缓存初始化失败会让 realtime/最近边界降级到 DB，但不影响核心写入和查询能力。
 		logrus.WithError(err).Error("recent usage event cache initialization failed; falling back to database queries")
 		recentUsageCache = nil
+	}
+	// Work hours are shared by the Usage page only. The product default is
+	// fixed at 09:00-18:00; persisted settings override it on startup.
+	workClock, err := workhours.Load(context.Background(), db)
+	if err != nil {
+		if recentUsageCache != nil {
+			recentUsageCache.Close()
+		}
+		if readDB != db {
+			_ = closeGormDB(readDB)
+		}
+		_ = closeGormDB(db)
+		return nil, failInitialization(logCloser, fmt.Errorf("load work hours: %w", err))
+	}
+	apiKeyTimeUsageService, err := service.NewAPIKeyTimeUsageService(db, service.APIKeyTimeUsageOptions{Clock: workClock})
+	if err != nil {
+		if recentUsageCache != nil {
+			recentUsageCache.Close()
+		}
+		if readDB != db {
+			_ = closeGormDB(readDB)
+		}
+		_ = closeGormDB(db)
+		return nil, failInitialization(logCloser, fmt.Errorf("initialize API key time usage: %w", err))
 	}
 	localRankingService, err := ranking.NewLocalRankingService(db, ranking.LocalRankingServiceOptions{})
 	if err != nil {
@@ -373,6 +398,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 				RequestLogs:        requestLogService,
 				Ranking:            rankingService,
 				LocalRanking:       localRankingService,
+				APIKeyTimeUsage:    apiKeyTimeUsageService,
+				WorkHours:          workhours.NewService(db, workClock),
 				Status: api.StatusRouteConfig{
 					CPAPublicURL:               cfg.CPAPublicURL,
 					CPARequestLogAccessEnabled: cfg.CPARequestLogAccessEnabled,

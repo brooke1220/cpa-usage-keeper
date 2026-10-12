@@ -350,6 +350,9 @@ func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, err
 
 const usageEventsRetentionDays = 90
 
+// UsageEventsHotRetentionDays 暴露 hot 表保留天数，供依赖 hot 事件回填的功能校验窗口。
+const UsageEventsHotRetentionDays = usageEventsRetentionDays
+
 // CleanupStorage 是每日维护任务的统一仓储入口：先清 inbox、归档 raw events，再清限期统计并条件式整理空闲页。
 func CleanupStorage(db *gorm.DB, now time.Time, rawRetentionDays int) (dto.StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
@@ -378,6 +381,10 @@ func CleanupStorage(db *gorm.DB, now time.Time, rawRetentionDays int) (dto.Stora
 	if err := CleanupUsageLatencyStats(db, now); err != nil {
 		return result, err
 	}
+	// API Key 用量的 15 分钟行只需覆盖报表窗口。
+	if err := CleanupUsageAPIKeyTimeStats(db, now); err != nil {
+		return result, err
+	}
 	vacuumResult, err := maybeVacuumStorage(db)
 	result.Vacuum = vacuumResult
 	if err != nil {
@@ -397,13 +404,9 @@ func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
 		return true, nil
 	}
 
-	// 同一事务内一次读取三行，避免分别查询时观察到不一致水位。
+	// 同一事务内一次读取全部水位，避免分别查询时观察到不一致水位。
 	var checkpoints []entities.UsageAggregationCheckpoint
-	names := []entities.UsageAggregationCheckpointName{
-		entities.UsageAggregationCheckpointOverview,
-		entities.UsageAggregationCheckpointActivity,
-		entities.UsageAggregationCheckpointLatency,
-	}
+	names := usageAggregationCheckpointNames
 	if err := tx.Where("name IN ?", names).Find(&checkpoints).Error; err != nil {
 		return false, fmt.Errorf("load usage aggregation archive watermarks: %w", err)
 	}

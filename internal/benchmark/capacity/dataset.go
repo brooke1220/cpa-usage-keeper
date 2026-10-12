@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/activity"
+	"cpa-usage-keeper/internal/apikeytime"
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/latency"
@@ -681,6 +682,7 @@ func buildDerivedDataset(ctx context.Context, db *gorm.DB, options GenerateOptio
 		entities.UsageAggregationCheckpointOverview,
 		entities.UsageAggregationCheckpointActivity,
 		entities.UsageAggregationCheckpointLatency,
+		entities.UsageAggregationCheckpointAPIKeyTime,
 	} {
 		cursor := int64(0)
 		for cursor < target {
@@ -716,6 +718,11 @@ func buildDerivedDataset(ctx context.Context, db *gorm.DB, options GenerateOptio
 				}
 				if err := repository.ApplyUsageLatencyAggregationPage(ctx, db, cursor, nextCursor, rows, options.Now); err != nil {
 					return fmt.Errorf("apply latency benchmark aggregation: %w", err)
+				}
+			case entities.UsageAggregationCheckpointAPIKeyTime:
+				rows := apikeytime.BuildRows(events, options.Now)
+				if err := repository.ApplyUsageAPIKeyTimeAggregationPage(ctx, db, cursor, nextCursor, rows, options.Now); err != nil {
+					return fmt.Errorf("apply api key time benchmark aggregation: %w", err)
 				}
 			}
 			cursor = nextCursor

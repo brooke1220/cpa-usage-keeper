@@ -47,6 +47,16 @@ func TestUsageAggregationRunnerSharedTurnReadsOneEventPageAndAdvancesAllRollups(
 	assertUsageAggregationCheckpoint(t, db, string(entities.UsageAggregationCheckpointOverview), 2)
 	assertUsageAggregationCheckpoint(t, db, string(entities.UsageAggregationCheckpointActivity), 2)
 	assertUsageAggregationCheckpoint(t, db, string(entities.UsageAggregationCheckpointLatency), 2)
+	assertUsageAggregationCheckpoint(t, db, string(entities.UsageAggregationCheckpointAPIKeyTime), 2)
+
+	var apiKeyTimeRows []entities.UsageAPIKeyTimeStat
+	if err := db.Order("bucket_start asc").Find(&apiKeyTimeRows).Error; err != nil {
+		t.Fatalf("load shared api key time rows: %v", err)
+	}
+	// 两条事件分别落在 12:15 和 12:30 两个 UTC 15 分钟 bucket。
+	if len(apiKeyTimeRows) != 2 || apiKeyTimeRows[0].TotalTokens != 10 || apiKeyTimeRows[1].TotalTokens != 20 || apiKeyTimeRows[0].MessageCount != 1 || apiKeyTimeRows[1].LatencyMS != 1100 {
+		t.Fatalf("unexpected shared api key time rows: %+v", apiKeyTimeRows)
+	}
 
 	var overviewRows int64
 	if err := db.Model(&entities.UsageOverviewHourlyStat{}).Count(&overviewRows).Error; err != nil {
@@ -105,13 +115,15 @@ func TestUsageAggregationRunnerFallbackCatchesUpEachCursorThenRestoresSharedRead
 	if result.Kind != poller.UsageAggregationKindRollups || !result.Processed {
 		t.Fatalf("unexpected fallback result: %+v", result)
 	}
-	if got := eventPageQueries.Load(); got != 3 {
-		t.Fatalf("expected three independent fallback page queries, got %d", got)
+	// Overview、Activity、Latency、API Key 用量四个 cursor 各自读取一页。
+	if got := eventPageQueries.Load(); got != 4 {
+		t.Fatalf("expected four independent fallback page queries, got %d", got)
 	}
 	for _, name := range []entities.UsageAggregationCheckpointName{
 		entities.UsageAggregationCheckpointOverview,
 		entities.UsageAggregationCheckpointActivity,
 		entities.UsageAggregationCheckpointLatency,
+		entities.UsageAggregationCheckpointAPIKeyTime,
 	} {
 		assertUsageAggregationCheckpoint(t, db, string(name), 3)
 	}
@@ -133,7 +145,7 @@ func TestUsageAggregationRunnerFallbackCatchesUpEachCursorThenRestoresSharedRead
 	if _, err := runner.RunOnce(context.Background()); err != nil {
 		t.Fatalf("run restored shared rollups turn: %v", err)
 	}
-	if got := eventPageQueries.Load(); got != 4 {
+	if got := eventPageQueries.Load(); got != 5 {
 		t.Fatalf("expected one shared query after fallback recovery, total=%d", got)
 	}
 }

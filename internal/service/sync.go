@@ -161,7 +161,7 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 				return result, identityErr
 			}
 			// 任一派生结果落后时运行兼容完整 catch-up；全部追平后继续保持空批静默。
-			pendingRollup := snapshot.OverviewCursor < targetEventID || snapshot.ActivityCursor < targetEventID || snapshot.LatencyCursor < targetEventID
+			pendingRollup := !snapshot.ReachedTarget(targetEventID)
 			if pendingRollup || pendingIdentity {
 				if aggregateErr := s.aggregateUsageEventStatsFallback(ctx, writeDB, fetchedAt); aggregateErr != nil {
 					result := newRedisBatchSyncResult("failed", 0)
@@ -780,7 +780,7 @@ func resolveUsageEventType(event entities.UsageEvent, resolver usageEventTypeRes
 // aggregateUsageEventStatsFallback 只供未注入后台 notifier 的兼容构造路径保留 main 聚合语义。
 func (s *SyncService) aggregateUsageEventStatsFallback(ctx context.Context, writeDB *gorm.DB, now time.Time) error {
 	// 兼容路径同样逐类尝试；任一结果失败只保留自己的旧水位，不能阻止其它派生结果追赶。
-	errs := make([]error, 0, 4)
+	errs := make([]error, 0, 5)
 	if err := repository.AggregateUsageOverviewStats(ctx, writeDB, now); err != nil {
 		errs = append(errs, fmt.Errorf("aggregate usage overview stats after redis inbox processing: %w", err))
 	}
@@ -789,6 +789,9 @@ func (s *SyncService) aggregateUsageEventStatsFallback(ctx context.Context, writ
 	}
 	if err := repository.AggregateUsageLatencyStats(ctx, writeDB, now); err != nil {
 		errs = append(errs, fmt.Errorf("aggregate usage latency stats after redis inbox processing: %w", err))
+	}
+	if err := repository.AggregateUsageAPIKeyTimeStats(ctx, writeDB, now); err != nil {
+		errs = append(errs, fmt.Errorf("aggregate usage api key time stats after redis inbox processing: %w", err))
 	}
 	// Identity 仍使用每行 cursor，但它自己的失败不再反向阻塞三个全局 rollup。
 	if err := repository.AggregateUsageIdentityStats(ctx, writeDB, now); err != nil {

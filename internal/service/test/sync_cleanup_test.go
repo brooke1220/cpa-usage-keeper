@@ -97,6 +97,9 @@ func catchUpSyncCleanupAggregations(t *testing.T, db *gorm.DB, now time.Time) {
 	if err := repository.AggregateUsageLatencyStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate latency before cleanup: %v", err)
 	}
+	if err := repository.AggregateUsageAPIKeyTimeStats(context.Background(), db, now); err != nil {
+		t.Fatalf("aggregate api key time before cleanup: %v", err)
+	}
 }
 
 func captureSyncCleanupLogs(t *testing.T, level logrus.Level) *bytes.Buffer {

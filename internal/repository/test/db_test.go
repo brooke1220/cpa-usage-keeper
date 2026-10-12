@@ -684,7 +684,10 @@ func TestCleanupStorageRetainsNinetyLocalDays(t *testing.T) {
 	if err := repository.AggregateUsageActivityStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate activity before cleanup: %v", err)
 	}
-	// 测试显式推进第三个全局 checkpoint 后，才满足 raw event 归档门禁。
+	if err := repository.AggregateUsageAPIKeyTimeStats(context.Background(), db, now); err != nil {
+		t.Fatalf("aggregate api key time before cleanup: %v", err)
+	}
+	// 测试显式推进 Latency checkpoint 后，才满足 raw event 归档门禁。
 	seedCaughtUpLatencyCheckpoint(t, db, now)
 
 	// 执行：三个全局 checkpoint 已追平且没有 identity delta 时运行维护。
@@ -735,7 +738,10 @@ func TestCleanupStorageUsesLocalCalendarDaysAcrossDST(t *testing.T) {
 	if err := repository.AggregateUsageActivityStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate activity before cleanup: %v", err)
 	}
-	// Latency 行必须和另外两类一起覆盖当前最大 ID，raw event 才可离开 hot 表。
+	if err := repository.AggregateUsageAPIKeyTimeStats(context.Background(), db, now); err != nil {
+		t.Fatalf("aggregate api key time before cleanup: %v", err)
+	}
+	// Latency 行必须和其它聚合一起覆盖当前最大 ID，raw event 才可离开 hot 表。
 	seedCaughtUpLatencyCheckpoint(t, db, now)
 
 	result, err := repository.CleanupStorage(db, now, 0)
@@ -807,6 +813,9 @@ func TestCleanupStorageDefersUsageEventsUntilLatencyCatchUp(t *testing.T) {
 	if err := repository.AggregateUsageActivityStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate activity before latency cleanup gate: %v", err)
 	}
+	if err := repository.AggregateUsageAPIKeyTimeStats(context.Background(), db, now); err != nil {
+		t.Fatalf("aggregate api key time before latency cleanup gate: %v", err)
+	}
 	var events []entities.UsageEvent
 	if err := db.Order("id asc").Find(&events).Error; err != nil {
 		t.Fatalf("load usage events: %v", err)
@@ -852,11 +861,12 @@ func TestCleanupStorageDefersUsageEventsUntilIdentityCatchUp(t *testing.T) {
 	if err := db.Order("id asc").Find(&events).Error; err != nil {
 		t.Fatalf("load usage events: %v", err)
 	}
-	// 三个全局水位均追平，确保本用例只由 Identity delta 阻止清理。
+	// 全部全局水位均追平，确保本用例只由 Identity delta 阻止清理。
 	checkpoints := []entities.UsageAggregationCheckpoint{
 		{Name: entities.UsageAggregationCheckpointOverview, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now},
 		{Name: entities.UsageAggregationCheckpointActivity, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now},
 		{Name: entities.UsageAggregationCheckpointLatency, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now},
+		{Name: entities.UsageAggregationCheckpointAPIKeyTime, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&checkpoints).Error; err != nil {
 		t.Fatalf("seed global aggregation checkpoints: %v", err)

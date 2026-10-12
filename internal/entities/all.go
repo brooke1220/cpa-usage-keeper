@@ -21,6 +21,8 @@ func All() []any {
 		&UsageActivityStat{},
 		// Latency hour/day 共用一张可合并聚合表。
 		&UsageLatencyStat{},
+		// API Key 用量页的 15 分钟预聚合。
+		&UsageAPIKeyTimeStat{},
 		&AuthSession{},
 		&AppSetting{},
 		// 通用额度周期必须先于百分比子表注册，确保全新数据库创建真实外键。
