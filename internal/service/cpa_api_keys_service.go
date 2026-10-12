@@ -21,6 +21,22 @@ type CPAAPIKeyProvider interface {
 	UpdateCPAAPIKeyAlias(ctx context.Context, id int64, keyAlias string) (entities.CPAAPIKey, error)
 }
 
+// CPAAPIKeyAliasImportMode 区分用户主动导入和设置页的后台自动导入。
+type CPAAPIKeyAliasImportMode string
+
+const (
+	// CPAAPIKeyAliasImportManual 由管理员在导入弹窗中确认，填充全部空别名。
+	CPAAPIKeyAliasImportManual CPAAPIKeyAliasImportMode = "manual"
+	// CPAAPIKeyAliasImportAuto 来自同源浏览器存储的后台导入，跳过管理员手动清空的别名。
+	CPAAPIKeyAliasImportAuto CPAAPIKeyAliasImportMode = "auto"
+)
+
+// CPAAPIKeyAliasImporter persists browser-local CPA names without exposing credentials.
+// It is optional so read-only providers remain compatible with the API routes.
+type CPAAPIKeyAliasImporter interface {
+	ImportCPAAPIKeyAliases(ctx context.Context, aliases []entities.CPAAPIKeyAlias, mode CPAAPIKeyAliasImportMode) ([]entities.CPAAPIKey, error)
+}
+
 type cpaAPIKeyService struct {
 	db *gorm.DB
 }
@@ -57,4 +73,8 @@ func (s *cpaAPIKeyService) UpdateCPAAPIKeyAlias(_ context.Context, id int64, key
 		return entities.CPAAPIKey{}, err
 	}
 	return repository.FindActiveCPAAPIKeyByID(s.db.Clauses(dbresolver.Write), id)
+}
+
+func (s *cpaAPIKeyService) ImportCPAAPIKeyAliases(ctx context.Context, aliases []entities.CPAAPIKeyAlias, mode CPAAPIKeyAliasImportMode) ([]entities.CPAAPIKey, error) {
+	return repository.ImportCPAAPIKeyAliases(s.db.WithContext(ctx), aliases, mode == CPAAPIKeyAliasImportAuto)
 }

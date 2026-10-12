@@ -145,3 +145,75 @@ func TestSyncCPAAPIKeysDoesNotConsumeIDsForExistingKeys(t *testing.T) {
 		t.Fatalf("expected second key id to be 2 without upsert sequence burn, got %d", row.ID)
 	}
 }
+
+func TestImportCPAAPIKeyAliasesPreservesExistingAliasesAndDeletedRows(t *testing.T) {
+	db := openTestDatabase(t)
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha", "sk-beta", "sk-deleted"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpdateCPAAPIKeyAlias(db, 2, "Keeper alias"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha", "sk-beta"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	aliases := []entities.CPAAPIKeyAlias{{ID: 1, KeyAlias: "  彭波庭  "}, {ID: 2, KeyAlias: "CPA replacement"}, {ID: 3, KeyAlias: "Deleted"}, {ID: 999, KeyAlias: "Missing"}}
+	rows, err := repository.ImportCPAAPIKeyAliases(db, aliases, false)
+	if err != nil || len(rows) != 1 || rows[0].ID != 1 || rows[0].KeyAlias != "彭波庭" || rows[0].KeyAliasSource != entities.CPAAPIKeyAliasSourceCPA {
+		t.Fatalf("unexpected imported aliases: %+v err=%v", rows, err)
+	}
+	row, err := repository.FindActiveCPAAPIKeyByID(db, 2)
+	if err != nil || row.KeyAlias != "Keeper alias" {
+		t.Fatalf("existing alias overwritten: %+v err=%v", row, err)
+	}
+	rows, err = repository.ImportCPAAPIKeyAliases(db, aliases, false)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("repeated import should be a no-op: %+v err=%v", rows, err)
+	}
+}
+
+func TestImportCPAAPIKeyAliasesBackgroundModeKeepsManuallyClearedAliases(t *testing.T) {
+	db := openTestDatabase(t)
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha", "sk-beta"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// 管理员清空 key 1 的别名；key 2 从未设置过。
+	if err := repository.UpdateCPAAPIKeyAlias(db, 1, "  "); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repository.FindActiveCPAAPIKeyByID(db, 1)
+	if err != nil || cleared.KeyAlias != "" || cleared.KeyAliasSource != entities.CPAAPIKeyAliasSourceManual {
+		t.Fatalf("clearing an alias must be recorded as a manual choice: %+v err=%v", cleared, err)
+	}
+	aliases := []entities.CPAAPIKeyAlias{{ID: 1, KeyAlias: "CPA alpha"}, {ID: 2, KeyAlias: "CPA beta"}}
+	rows, err := repository.ImportCPAAPIKeyAliases(db, aliases, true)
+	if err != nil || len(rows) != 1 || rows[0].ID != 2 || rows[0].KeyAlias != "CPA beta" {
+		t.Fatalf("background import must skip the manually cleared alias: %+v err=%v", rows, err)
+	}
+	if row, err := repository.FindActiveCPAAPIKeyByID(db, 1); err != nil || row.KeyAlias != "" {
+		t.Fatalf("manually cleared alias was refilled: %+v err=%v", row, err)
+	}
+	// 用户在导入弹窗中主动确认时，空别名仍然可以填充。
+	rows, err = repository.ImportCPAAPIKeyAliases(db, aliases, false)
+	if err != nil || len(rows) != 1 || rows[0].ID != 1 || rows[0].KeyAlias != "CPA alpha" || rows[0].KeyAliasSource != entities.CPAAPIKeyAliasSourceCPA {
+		t.Fatalf("explicit import should fill the cleared alias: %+v err=%v", rows, err)
+	}
+}
+
+func TestImportCPAAPIKeyAliasesRollsBackAllChangesOnFailure(t *testing.T) {
+	db := openTestDatabase(t)
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha", "sk-beta"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER reject_second_alias BEFORE UPDATE OF key_alias ON cpa_api_keys WHEN NEW.id = 2 BEGIN SELECT RAISE(ABORT, 'test alias failure'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repository.ImportCPAAPIKeyAliases(db, []entities.CPAAPIKeyAlias{{ID: 1, KeyAlias: "Alpha"}, {ID: 2, KeyAlias: "Beta"}}, false)
+	if err == nil || rows != nil {
+		t.Fatalf("expected atomic import failure, got %+v err=%v", rows, err)
+	}
+	row, err := repository.FindActiveCPAAPIKeyByID(db, 1)
+	if err != nil || row.KeyAlias != "" {
+		t.Fatalf("failed import was not rolled back: %+v err=%v", row, err)
+	}
+}

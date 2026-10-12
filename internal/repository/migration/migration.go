@@ -103,6 +103,12 @@ const (
 	migrationLimitLatencySamplePoints = "20260925_limit_latency_sample_points"
 	// migrationAddUsageEventTraceMetadata 只保存上游提供的执行与节点元数据，历史行保持 NULL。
 	migrationAddUsageEventTraceMetadata = "20261008_usage_event_trace_metadata"
+	// migrationUsageAPIKeyTimeCheckpoint 重建 checkpoint CHECK 并创建 API Key 用量 15 分钟预聚合表。
+	migrationUsageAPIKeyTimeCheckpoint = "20261012_usage_api_key_time_checkpoint"
+	// migrationUsageAPIKeyTimeStats 从 hot usage_events 逐页回填 API Key 用量预聚合。
+	migrationUsageAPIKeyTimeStats = "20261012_usage_api_key_time_stats"
+	// migrationAddCPAAPIKeyAliasSource 记录别名来源，自动导入不再覆盖管理员手动清空的别名。
+	migrationAddCPAAPIKeyAliasSource = "20261012_cpa_api_key_alias_source"
 )
 
 type schemaMigration struct {
@@ -255,6 +261,11 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationNormalizeUsageEventParentSessionNull, run: normalizeUsageEventParentSessionNullMigration},
 		{version: migrationLimitLatencySamplePoints, run: limitLatencySamplePointsMigration, destructive: true},
 		{version: migrationAddUsageEventTraceMetadata, run: addUsageEventTraceMetadataMigration},
+		// checkpoint 表重建、复制、验证和改名必须由默认外层事务共同保护。
+		{version: migrationUsageAPIKeyTimeCheckpoint, run: usageAPIKeyTimeCheckpointMigration},
+		// 回填逐页提交，外层长事务会破坏断点续跑语义。
+		{version: migrationUsageAPIKeyTimeStats, run: usageAPIKeyTimeStatsMigration, disableTransaction: true},
+		{version: migrationAddCPAAPIKeyAliasSource, run: addCPAAPIKeyAliasSourceMigration},
 	}
 }
 

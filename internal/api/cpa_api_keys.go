@@ -17,6 +17,7 @@ import (
 )
 
 const maxCPAAPIKeyAliasLength = 128
+const maxCPAAPIKeyAliasImportItems = 1000
 
 type cpaAPIKeyResponse struct {
 	ID           string  `json:"id"`
@@ -79,6 +80,73 @@ func registerCPAAPIKeyRoutes(router gin.IRoutes, provider service.CPAAPIKeyProvi
 			return
 		}
 		c.JSON(http.StatusOK, cpaAPIKeyOptionsResponse{Options: rows})
+	})
+
+	router.POST("/usage/api-keys/aliases/import", func(c *gin.Context) {
+		importer, ok := provider.(service.CPAAPIKeyAliasImporter)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "api key alias importer is not configured"})
+			return
+		}
+		var request struct {
+			Items []struct {
+				ID       string `json:"id"`
+				KeyAlias string `json:"keyAlias"`
+			} `json:"items"`
+			Mode string `json:"mode"`
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		mode := service.CPAAPIKeyAliasImportManual
+		switch strings.TrimSpace(request.Mode) {
+		case "", string(service.CPAAPIKeyAliasImportManual):
+		case string(service.CPAAPIKeyAliasImportAuto):
+			mode = service.CPAAPIKeyAliasImportAuto
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid alias import mode"})
+			return
+		}
+		if len(request.Items) == 0 || len(request.Items) > maxCPAAPIKeyAliasImportItems {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid alias import item count"})
+			return
+		}
+		aliases := make([]entities.CPAAPIKeyAlias, 0, len(request.Items))
+		seen := make(map[int64]struct{}, len(request.Items))
+		for _, item := range request.Items {
+			id, err := strconv.ParseInt(strings.TrimSpace(item.ID), 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid api key id"})
+				return
+			}
+			if _, duplicate := seen[id]; duplicate {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "duplicate api key id"})
+				return
+			}
+			seen[id] = struct{}{}
+			name := strings.TrimSpace(item.KeyAlias)
+			if name == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "api key alias is empty"})
+				return
+			}
+			if err := validateCPAAPIKeyAlias(name); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			aliases = append(aliases, entities.CPAAPIKeyAlias{ID: id, KeyAlias: name})
+		}
+		rows, err := importer.ImportCPAAPIKeyAliases(c.Request.Context(), aliases, mode)
+		if err != nil {
+			writeInternalError(c, "import api key aliases failed", err)
+			return
+		}
+		items := make([]cpaAPIKeyResponse, 0, len(rows))
+		for _, row := range rows {
+			items = append(items, toCPAAPIKeyResponse(row))
+		}
+		c.JSON(http.StatusOK, cpaAPIKeyListResponse{Items: items})
 	})
 
 	router.PATCH("/usage/api-keys/:id", func(c *gin.Context) {

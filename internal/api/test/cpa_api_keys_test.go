@@ -217,3 +217,97 @@ func TestUpdateCPAAPIKeyAliasRejectsInvalidInputAndDeletedRows(t *testing.T) {
 		}
 	}
 }
+
+func TestCPAAPIKeyAliasImportPersistsNamesWithoutOverwritingOrLeakingKeys(t *testing.T) {
+	db := openAPITestDatabase(t)
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha123456", "sk-beta654321"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpdateCPAAPIKeyAlias(db, 2, "Keeper alias"); err != nil {
+		t.Fatal(err)
+	}
+	router := keeperapi.NewRouter(nil, nil, nil, nil, keeperapi.AuthConfig{}, nil, "/keeper", keeperapi.OptionalProviders{CPAAPIKeys: service.NewCPAAPIKeyService(db)})
+	requestBody := `{"items":[{"id":"1","keyAlias":"  彭波庭  "},{"id":"2","keyAlias":"CPA name"}]}`
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/keeper/api/v1/usage/api-keys/aliases/import", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK || strings.Contains(resp.Body.String(), "sk-alpha123456") || strings.Contains(resp.Body.String(), "sk-beta654321") {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var parsed struct {
+		Items []struct{ ID, KeyAlias, Label string } `json:"items"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Items) != 1 || parsed.Items[0].ID != "1" || parsed.Items[0].KeyAlias != "彭波庭" || parsed.Items[0].Label != "彭波庭" {
+		t.Fatalf("unexpected imported aliases: %+v", parsed.Items)
+	}
+	row, err := repository.FindActiveCPAAPIKeyByID(db, 2)
+	if err != nil || row.KeyAlias != "Keeper alias" {
+		t.Fatalf("Keeper alias was overwritten: %+v err=%v", row, err)
+	}
+}
+
+func TestCPAAPIKeyAliasAutoImportKeepsAliasesClearedInKeeper(t *testing.T) {
+	db := openAPITestDatabase(t)
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha123456", "sk-beta654321"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	router := keeperapi.NewRouter(nil, nil, nil, nil, keeperapi.AuthConfig{}, nil, "", keeperapi.OptionalProviders{CPAAPIKeys: service.NewCPAAPIKeyService(db)})
+	send := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		resp := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+		router.ServeHTTP(resp, req)
+		return resp
+	}
+	// 管理员在 Keeper 中清空 key 1 的别名。
+	if resp := send(http.MethodPatch, "/api/v1/usage/api-keys/1", `{"keyAlias":""}`); resp.Code != http.StatusOK {
+		t.Fatalf("clear alias: status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := `{"mode":"auto","items":[{"id":"1","keyAlias":"CPA alpha"},{"id":"2","keyAlias":"CPA beta"}]}`
+	resp := send(http.MethodPost, "/api/v1/usage/api-keys/aliases/import", body)
+	if resp.Code != http.StatusOK || strings.Contains(resp.Body.String(), "CPA alpha") || !strings.Contains(resp.Body.String(), "CPA beta") {
+		t.Fatalf("auto import must skip the cleared alias: status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if row, err := repository.FindActiveCPAAPIKeyByID(db, 1); err != nil || row.KeyAlias != "" {
+		t.Fatalf("cleared alias was refilled: %+v err=%v", row, err)
+	}
+	// 用户在导入弹窗中主动导入时，空别名仍然会被填充。
+	resp = send(http.MethodPost, "/api/v1/usage/api-keys/aliases/import", `{"mode":"manual","items":[{"id":"1","keyAlias":"CPA alpha"}]}`)
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "CPA alpha") {
+		t.Fatalf("manual import should fill the cleared alias: status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := send(http.MethodPost, "/api/v1/usage/api-keys/aliases/import", `{"mode":"silent","items":[{"id":"2","keyAlias":"x"}]}`); resp.Code != http.StatusBadRequest {
+		t.Fatalf("unknown mode should be rejected: status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestCPAAPIKeyAliasImportRejectsInvalidBatchesBeforeWriting(t *testing.T) {
+	for _, body := range []string{`{}`, `{"items":[]}`, `{"items":[{"id":1,"keyAlias":"Alpha"}]}`, `{"items":[{"id":"0","keyAlias":"Alpha"}]}`, `{"items":[{"id":"1","keyAlias":"Alpha"},{"id":"1","keyAlias":"Beta"}]}`, `{"items":[{"id":"1","keyAlias":"Alpha"},{"id":"2","keyAlias":" "}]}`, `{"items":[{"id":"1","keyAlias":"Alpha"},{"id":"2","keyAlias":"bad\nname"}]}`, `{"mode":"silent","items":[{"id":"1","keyAlias":"Alpha"}]}`} {
+		t.Run(body, func(t *testing.T) {
+			db := openAPITestDatabase(t)
+			if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha"}, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			router := keeperapi.NewRouter(nil, nil, nil, nil, keeperapi.AuthConfig{}, nil, "", keeperapi.OptionalProviders{CPAAPIKeys: service.NewCPAAPIKeyService(db)})
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/usage/api-keys/aliases/import", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+			router.ServeHTTP(resp, req)
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+			}
+			row, err := repository.FindActiveCPAAPIKeyByID(db, 1)
+			if err != nil || row.KeyAlias != "" {
+				t.Fatalf("invalid import modified aliases: %+v err=%v", row, err)
+			}
+		})
+	}
+}
