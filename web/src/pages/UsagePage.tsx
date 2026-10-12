@@ -1,9 +1,11 @@
 import { CredentialEditModal } from '@/components/usage/credentials/CredentialEditModal';
+import { APIKeyTimeUsagePage } from '@/features/api-key-time-usage/APIKeyTimeUsagePage';
+import { CPA_API_KEY_NAMES_PREFIX, matchCPAApiKeyNames, readAccessibleCPAApiKeyNames, type CPAApiKeyAliasImport } from '@/lib/cpaApiKeyNames';
 import { UsageComparisonCharts } from '@/components/usage/UsageComparisonCharts';
 import { useState, useMemo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentity, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
-import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentity, fetchVersion, importCpaApiKeyAliases, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyDisplayItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { DEFAULT_USAGE_TAB, getUsageTabPath, handleUsageTabKeyActivation, resolveInitialUsageTab, shouldHandleUsageNavigation, USAGE_TAB_OPTIONS, type UsageTab } from '@/lib/usageNavigation';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
@@ -24,6 +26,7 @@ import {
   OverviewRealtimePanel,
   AnalysisPanel,
   ApiKeySettingsCard,
+  WorkHoursSettingsCard,
   SessionSettingsCard,
   PriceSettingsCard,
   AuthFileCredentialsSection,
@@ -84,6 +87,7 @@ const USAGE_TAB_LABEL_KEYS: Record<UsageTab, string> = {
   overview: 'usage_stats.tab_overview',
   realtime: 'usage_stats.tab_realtime',
   analysis: 'usage_stats.tab_analysis',
+  'api-key-usage': 'usage_stats.tab_usage',
   ranking: 'usage_stats.tab_ranking',
   events: 'usage_stats.tab_events',
   'auth-files': 'usage_stats.tab_auth_files',
@@ -150,9 +154,9 @@ export const getCredentialSectionVisibility = (tab: UsageTab) => ({
   showAiProvider: tab === 'ai-provider',
 });
 
-export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'realtime' && tab !== 'ranking' && tab !== 'settings' && !getCredentialSectionVisibility(tab).enabled;
+export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'realtime' && tab !== 'api-key-usage' && tab !== 'ranking' && tab !== 'settings' && !getCredentialSectionVisibility(tab).enabled;
 
-export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'realtime' || shouldShowRangeControls(tab);
+export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'realtime' || tab === 'api-key-usage' || shouldShowRangeControls(tab);
 
 // 恢复出来的 API Key 筛选只有在选项成功加载后才能判定失效；加载中或加载失败时保留选择，避免被空列表误清。
 export const shouldResetSelectedApiKeyFilter = (
@@ -904,6 +908,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [apiKeySettingsError, setApiKeySettingsError] = useState('');
   const [apiKeySettingsSavingId, setApiKeySettingsSavingId] = useState<string | null>(null);
   const apiKeySettingsRequestControllerRef = useRef<AbortController | null>(null);
+  const apiKeyAliasWriteVersionsRef = useRef<Map<string, number>>(new Map());
+  const autoImportSignatureRef = useRef('');
   const [authSessions, setAuthSessions] = useState<AuthManagedSessionItem[]>([]);
   const [authSessionsLoading, setAuthSessionsLoading] = useState(false);
   const [authSessionsError, setAuthSessionsError] = useState('');
@@ -953,6 +959,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const eventsFilterOptionsRequestControllerRef = useRef<AbortController | null>(null);
   const requestLogControllerRef = useRef<AbortController | null>(null);
   const [manualRefreshLoading, setManualRefreshLoading] = useState(false);
+  const [apiKeyTimeUsageRefresh, setAPIKeyTimeUsageRefresh] = useState(0);
+  const [workHoursRefresh, setWorkHoursRefresh] = useState(0);
   const [pageVisible, setPageVisible] = useState(isUsagePageVisible);
   const showTopNotice = useCallback((kind: TopNoticeKind, message: string) => {
     if (topNoticeTimerRef.current !== null) {
@@ -1179,6 +1187,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, [onAuthRequired]);
 
   const handleSaveApiKeyAlias = useCallback(async (id: string, keyAlias: string) => {
+    apiKeyAliasWriteVersionsRef.current.set(id, (apiKeyAliasWriteVersionsRef.current.get(id) ?? 0) + 1);
     setApiKeySettingsSavingId(id);
     setApiKeySettingsError('');
     try {
@@ -1201,6 +1210,37 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       setApiKeySettingsSavingId(null);
     }
   }, [onAuthRequired, patchLocalRankingProfileCache, showTopNotice, t]);
+
+  const applyImportedApiKeyAliases = useCallback((items: CpaApiKeyDisplayItem[]) => {
+    if (!items.length) return;
+    const byID = new Map(items.map((item) => [item.id, item]));
+    setApiKeySettings((current) => current.map((item) => byID.get(item.id) ? { ...item, ...byID.get(item.id) } : item));
+    setApiKeyOptions((current) => current.map((item) => {
+      const updated = byID.get(item.id);
+      return updated ? { ...item, label: updated.label } : item;
+    }));
+    for (const item of items) {
+      patchLocalRankingProfileCache(item.id, { key_alias: item.keyAlias, display_name: item.label });
+    }
+  }, [patchLocalRankingProfileCache]);
+
+  const importCPAKeyNamesToKeeper = useCallback(async (items: CPAApiKeyAliasImport[], signal?: AbortSignal, mode: 'manual' | 'auto' = 'manual') => {
+    const versions = new Map(items.map((item) => [item.id, apiKeyAliasWriteVersionsRef.current.get(item.id) ?? 0]));
+    const response = await importCpaApiKeyAliases(items, signal, mode);
+    if (!signal?.aborted) {
+      applyImportedApiKeyAliases(response.items.filter((item) => versions.get(item.id) === (apiKeyAliasWriteVersionsRef.current.get(item.id) ?? 0)));
+    }
+    return response.items.length;
+  }, [applyImportedApiKeyAliases]);
+
+  const handleImportCPAKeyNames = useCallback(async (items: CPAApiKeyAliasImport[]) => {
+    try {
+      return await importCPAKeyNamesToKeeper(items);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onAuthRequired?.();
+      throw error;
+    }
+  }, [importCPAKeyNamesToKeeper, onAuthRequired]);
 
   const handleRevokeAuthSession = useCallback(async (session: AuthManagedSessionItem) => {
     setAuthSessionRevokingId(session.id);
@@ -1774,6 +1814,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([loadEventFilterOptions(), loadEvents()]);
       return;
     }
+    if (activeTab === 'api-key-usage') {
+      setAPIKeyTimeUsageRefresh(value => value + 1);
+      return;
+    }
     if (activeTab === 'ranking') {
       await refreshRanking();
       return;
@@ -1787,6 +1831,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     if (activeTab === 'settings') {
+      setWorkHoursRefresh(value => value + 1);
       await Promise.all([loadAuthSessions(), loadApiKeySettings(), loadPricing()]);
       return;
     }
@@ -1968,6 +2013,58 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       authSessionsRequestControllerRef.current = null;
     };
   }, [activeTab, loadApiKeySettings, loadAuthSessions]);
+
+  useEffect(() => {
+    if (activeTab !== 'settings' || !status || apiKeySettingsLoading || apiKeySettingsSavingId || !apiKeySettings.length || !cpaManagementURL) return;
+    const controller = new AbortController();
+    let importing = false;
+    const importBrowserNames = async () => {
+      if (importing || controller.signal.aborted) return;
+      const items = matchCPAApiKeyNames(apiKeySettings, readAccessibleCPAApiKeyNames(cpaManagementURL), cpaManagementURL);
+      if (!items.length) {
+        autoImportSignatureRef.current = '';
+        return;
+      }
+      const signature = `${cpaManagementURL}|${items.map(item => `${item.id}:${item.keyAlias}`).join('|')}`;
+      if (signature === autoImportSignatureRef.current) return;
+      importing = true;
+      try {
+        // Background imports never refill an alias the administrator cleared in Keeper.
+        const count = await importCPAKeyNamesToKeeper(items, controller.signal, 'auto');
+        if (!controller.signal.aborted) {
+          autoImportSignatureRef.current = signature;
+          if (count > 0) showTopNotice('success', t('usage_stats.api_key_names_auto_imported', { count }));
+        }
+      } catch (error) {
+        // Browser storage can be unavailable in an embedded or cross-origin page;
+        // manual import must remain available. Authentication errors still end the session.
+        if (!controller.signal.aborted && error instanceof ApiError && error.status === 401) onAuthRequired?.();
+      } finally {
+        importing = false;
+      }
+    };
+    let scheduledImport: ReturnType<typeof setTimeout> | null = null;
+    const scheduleImport = () => {
+      if (scheduledImport !== null) clearTimeout(scheduledImport);
+      scheduledImport = setTimeout(() => {
+        scheduledImport = null;
+        void importBrowserNames();
+      }, 200);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith(CPA_API_KEY_NAMES_PREFIX)) scheduleImport();
+    };
+    const handleFocus = scheduleImport;
+    void importBrowserNames();
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      controller.abort();
+      if (scheduledImport !== null) clearTimeout(scheduledImport);
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [activeTab, apiKeySettings, apiKeySettingsLoading, apiKeySettingsSavingId, cpaManagementURL, importCPAKeyNamesToKeeper, onAuthRequired, showTopNotice, status, t]);
 
   useEffect(() => {
     const next = sanitizeRequestEventFilters(
@@ -2375,6 +2472,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               </>
             )}
 
+            {activeTab === 'api-key-usage' && (
+              <APIKeyTimeUsagePage apiKeyId={requestApiKeyId} refreshToken={apiKeyTimeUsageRefresh} onAuthRequired={onAuthRequired} />
+            )}
+
             {credentialSectionVisibility.enabled && (
               <>
                 {credentialsData.error && <div className={styles.errorBox}>{credentialsData.error}</div>}
@@ -2448,6 +2549,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
             {activeTab === 'settings' && (
               <div className={styles.settingsSections}>
+                <WorkHoursSettingsCard refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} />
                 <SessionSettingsCard
                   sessions={authSessions}
                   loading={authSessionsLoading}
@@ -2460,6 +2562,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   apiKeys={apiKeySettings}
                   loading={apiKeySettingsLoading}
                   savingId={apiKeySettingsSavingId}
+                  cpaURL={cpaManagementURL}
+                  onImportCPANames={handleImportCPAKeyNames}
                   onSaveAlias={handleSaveApiKeyAlias}
                   onNotice={showTopNotice}
                 />

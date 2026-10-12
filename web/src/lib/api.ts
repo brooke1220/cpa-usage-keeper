@@ -898,6 +898,21 @@ export async function fetchCpaApiKeySettings(signal?: AbortSignal): Promise<CpaA
   return response.json()
 }
 
+// mode=auto is the settings page reading same-origin CPAMC storage in the background;
+// the server then skips aliases an administrator deliberately cleared in Keeper.
+export async function importCpaApiKeyAliases(items: { id: string; keyAlias: string }[], signal?: AbortSignal, mode: 'manual' | 'auto' = 'manual'): Promise<CpaApiKeysResponse> {
+  const response = await apiFetch(apiPath('/usage/api-keys/aliases/import'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, mode }),
+    signal,
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to import CPA API key names: ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function updateCpaApiKeyAlias(id: string, keyAlias: string): Promise<CpaApiKeyDisplayItem> {
   const response = await apiFetch(apiPath(`/usage/api-keys/${encodeURIComponent(id)}`), {
     method: 'PATCH',

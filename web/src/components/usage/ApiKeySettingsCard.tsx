@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/Input';
 import { IconCheck, IconCopy, IconEye, IconEyeOff } from '@/components/ui/icons';
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
 import type { CpaApiKeySettingsItem } from '@/lib/types';
+import { CPA_API_KEY_NAMES_EXPORT_SCRIPT, type CPAApiKeyAliasImport } from '@/lib/cpaApiKeyNames';
+import { CPAApiKeyNamesImportModal } from './CPAApiKeyNamesImportModal';
 import styles from '@/pages/UsagePage.module.scss';
 
 type ClipboardWriter = Pick<Clipboard, 'writeText'>;
@@ -91,12 +93,15 @@ export interface ApiKeySettingsCardProps {
   apiKeys: CpaApiKeySettingsItem[];
   loading?: boolean;
   savingId?: string | null;
+  cpaURL?: string;
+  onImportCPANames?: (items: CPAApiKeyAliasImport[]) => Promise<number>;
   onSaveAlias: (id: string, keyAlias: string) => void | Promise<void>;
   onNotice?: (kind: 'success' | 'info' | 'error', message: string) => void;
 }
 
-export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, onSaveAlias, onNotice }: ApiKeySettingsCardProps) {
+export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, cpaURL = '', onImportCPANames, onSaveAlias, onNotice }: ApiKeySettingsCardProps) {
   const { t } = useTranslation();
+  const [importOpen, setImportOpen] = useState(false);
   const [showFullApiKeys, setShowFullApiKeys] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,8 +113,14 @@ export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, 
   );
   const [draftAliases, setDraftAliases] = useState<Record<string, string>>(initialAliases);
 
+  const previousAliasesRef = useRef(initialAliases);
   useEffect(() => {
-    setDraftAliases(initialAliases);
+    const previousAliases = previousAliasesRef.current;
+    setDraftAliases((current) => Object.fromEntries(Object.entries(initialAliases).map(([id, alias]) => {
+      const draft = current[id];
+      return [id, draft !== undefined && draft !== previousAliases[id] && draft.trim() !== alias ? draft : alias];
+    })));
+    previousAliasesRef.current = initialAliases;
   }, [initialAliases]);
 
   useEffect(() => () => {
@@ -140,6 +151,9 @@ export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, 
     <Card
       title={t('usage_stats.api_key_settings_title')}
       subtitle={t('usage_stats.api_key_settings_subtitle')}
+      extra={onImportCPANames && <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)} disabled={loading || !apiKeys.length || !!savingId}>
+        {t('usage_stats.api_key_names_import_title')}
+      </Button>}
       titleMeta={
         <Button
           type="button"
@@ -217,6 +231,11 @@ export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, 
           </div>
         )}
       </div>
+      {importOpen && onImportCPANames && <CPAApiKeyNamesImportModal
+        apiKeys={apiKeys} cpaURL={cpaURL} onClose={() => setImportOpen(false)}
+        onCopyScript={() => copyApiKeyToClipboard(CPA_API_KEY_NAMES_EXPORT_SCRIPT)}
+        onImport={onImportCPANames} onNotice={onNotice}
+      />}
     </Card>
   );
 }

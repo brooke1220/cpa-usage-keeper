@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, appPath, isUsageRangeBoundsConflict, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyAnalysis, fetchKeyAnalysisLatency, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, setCredentialDisabled, setCredentialPriority, startUsageQuotaInspection, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { ApiError, appPath, isUsageRangeBoundsConflict, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyAnalysis, fetchKeyAnalysisLatency, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, importCpaApiKeyAliases, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, setCredentialDisabled, setCredentialPriority, startUsageQuotaInspection, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -676,6 +676,23 @@ describe('fetchUsageEvents', () => {
     expect(new URL(String(updateUrl), 'http://localhost').pathname).toBe('/api/v1/usage/api-keys/123');
     expect(updateInit).toMatchObject({ credentials: 'include', method: 'PATCH' });
     expect(updateInit?.body).toBe(JSON.stringify({ keyAlias: '' }));
+  });
+
+  it('imports CPA aliases through the admin endpoint', async () => {
+    const fetchMock = mockJSON({ items: [{ id: '1', keyAlias: 'CPA name', displayKey: 'sk-*********123456', label: 'CPA name', lastSyncedAt: null }] });
+    const signal = new AbortController().signal;
+    const response = await importCpaApiKeyAliases([{ id: '1', keyAlias: 'CPA name' }], signal);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(response.items[0].keyAlias).toBe('CPA name');
+    expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/usage/api-keys/aliases/import');
+    expect(init).toMatchObject({ credentials: 'include', method: 'POST', signal });
+    expect(init?.body).toBe(JSON.stringify({ items: [{ id: '1', keyAlias: 'CPA name' }], mode: 'manual' }));
+  });
+
+  it('marks background CPA name imports so manually cleared aliases stay empty', async () => {
+    const fetchMock = mockJSON({ items: [] });
+    await importCpaApiKeyAliases([{ id: '1', keyAlias: 'CPA name' }], undefined, 'auto');
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ items: [{ id: '1', keyAlias: 'CPA name' }], mode: 'auto' }));
   });
 
   it('loads paged usage identities for one credential auth type', async () => {

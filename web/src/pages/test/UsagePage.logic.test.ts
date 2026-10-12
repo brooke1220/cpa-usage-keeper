@@ -792,6 +792,7 @@ for (const [tab, expected] of [
   ['overview', true],
   ['realtime', false],
   ['analysis', true],
+  ['api-key-usage', false],
   ['ranking', false],
   ['events', true],
   ['auth-files', false],
@@ -807,6 +808,7 @@ for (const [tab, expected] of [
   ['overview', true],
   ['realtime', true],
   ['analysis', true],
+  ['api-key-usage', true],
   ['ranking', false],
   ['events', true],
   ['auth-files', false],
@@ -826,6 +828,7 @@ describe('UsagePage tab labels', () => {
       'translated:usage_stats.tab_overview',
       'translated:usage_stats.tab_realtime',
       'translated:usage_stats.tab_analysis',
+      'translated:usage_stats.tab_usage',
       'translated:usage_stats.tab_ranking',
       'translated:usage_stats.tab_events',
       'translated:usage_stats.tab_auth_files',
@@ -837,7 +840,7 @@ describe('UsagePage tab labels', () => {
   it('omits Ranking from the CPAMC embedded navigation', () => {
     const values = getUsageTabOptions((key) => key, { includeRanking: false }).map((option) => option.value);
 
-    expect(values).toEqual(['overview', 'realtime', 'analysis', 'events', 'auth-files', 'ai-provider', 'settings']);
+    expect(values).toEqual(['overview', 'realtime', 'analysis', 'api-key-usage', 'events', 'auth-files', 'ai-provider', 'settings']);
   });
 });
 
