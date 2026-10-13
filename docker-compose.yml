@@ -16,4 +16,4 @@ services:
     volumes:
       - ./keeper:/data
     security_opt:
-      - seccomp=unconfined
+      - seccomp=./keeper-seccomp.json
