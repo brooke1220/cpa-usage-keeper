@@ -2,7 +2,6 @@
 # docker compose up -d --build
 services:
   cpa-usage-keeper:
-    image: cpa-usage-keeper:latest
     container_name: cpa-usage-keeper
     build:
       context: .
