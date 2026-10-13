@@ -301,15 +301,36 @@ Open `http://your-server-address:8080` and sign in with your Keeper password. Ru
 
 Keeper data is stored under `./data` by the provided template.
 
+#### Build Keeper From Source
+
+With CPA already deployed, use the [local build Compose configuration](./docker-compose.yml) from the root of a complete source checkout to build Keeper yourself. The Dockerfile compiles the frontend and backend inside containers, so the host does not need Go or Node.js.
+
+For a new setup, copy `.env.example` to `.env` in the repository root and configure `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY`, and `LOGIN_PASSWORD` as described in the Keeper-only section above. For CPA running on the Docker host, use `CPA_BASE_URL=http://host.docker.internal:8317`. Edit an existing `.env` directly.
+
+```bash
+cp .env.example .env
+vim .env
+docker compose up -d --build
+```
+
+The configuration reads `.env` from the repository root and stores data in the root's `./data` directory. After updating the source, run the same `up -d --build` command to rebuild and start Keeper.
+
+View logs or stop the service from the repository root:
+
+```bash
+docker compose logs --tail=100 -f cpa-usage-keeper
+docker compose down
+```
+
 #### Logs and Updates
 
-For either Compose setup, view Keeper logs from the deployment directory:
+For either Compose setup using a prebuilt image, view Keeper logs from the deployment directory:
 
 ```bash
 docker compose logs --tail=100 -f cpa-usage-keeper
 ```
 
-To update Keeper, keep your configuration and data directories and run:
+To update a prebuilt Keeper image, keep your configuration and data directories and run:
 
 ```bash
 docker compose pull cpa-usage-keeper

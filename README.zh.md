@@ -301,15 +301,36 @@ docker compose up -d
 
 模板默认将 Keeper 数据保存在 `./data`。
 
+#### 从源码编译 Keeper
+
+已有 CPA、希望自己编译 Keeper 时，在完整源码仓库的根目录使用 [本地构建 Compose 配置](./docker-compose.yml)。Dockerfile 会在容器中编译前端和后端，无需在宿主机安装 Go 或 Node.js。
+
+首次使用时，将 `.env.example` 复制为根目录的 `.env`，按上方 Keeper-only 说明设置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY` 和 `LOGIN_PASSWORD`。CPA 在宿主机运行时，使用 `CPA_BASE_URL=http://host.docker.internal:8317`。已有 `.env` 时直接编辑。
+
+```bash
+cp .env.example .env
+vim .env
+docker compose up -d --build
+```
+
+配置直接读取仓库根目录的 `.env`，数据保存在根目录的 `./data`。更新源码后再次执行上述 `up -d --build` 命令即可重新编译并启动。
+
+在仓库根目录查看日志或停止服务：
+
+```bash
+docker compose logs --tail=100 -f cpa-usage-keeper
+docker compose down
+```
+
 #### 查看日志与更新
 
-两种 Compose 部署均可在部署目录中查看 Keeper 日志：
+使用预构建镜像的两种 Compose 部署均可在部署目录中查看 Keeper 日志：
 
 ```bash
 docker compose logs --tail=100 -f cpa-usage-keeper
 ```
 
-更新 Keeper 时，保留配置和数据目录，执行：
+更新预构建的 Keeper 镜像时，保留配置和数据目录，执行：
 
 ```bash
 docker compose pull cpa-usage-keeper
