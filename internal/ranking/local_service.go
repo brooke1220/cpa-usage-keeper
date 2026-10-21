@@ -241,8 +241,8 @@ WITH ranged_events AS (
 		SUM(events.total_tokens) AS total_tokens,
 		SUM(CASE WHEN events.failed = 0 AND events.ttft_ms IS NOT NULL AND events.ttft_ms > 0 AND events.latency_ms > 0 THEN events.ttft_ms ELSE 0 END) AS ttft_sum_ms,
 		SUM(CASE WHEN events.failed = 0 AND events.ttft_ms IS NOT NULL AND events.ttft_ms > 0 AND events.latency_ms > 0 THEN 1 ELSE 0 END) AS ttft_sample_count,
-		SUM(CASE WHEN events.failed = 0 AND events.ttft_ms IS NOT NULL AND events.ttft_ms > 0 AND events.latency_ms > 0 THEN events.latency_ms ELSE 0 END) AS latency_sum_ms,
-		SUM(CASE WHEN events.failed = 0 AND events.ttft_ms IS NOT NULL AND events.ttft_ms > 0 AND events.latency_ms > 0 THEN 1 ELSE 0 END) AS latency_sample_count
+		SUM(CASE WHEN events.failed = 0 AND events.latency_ms > 0 THEN events.latency_ms ELSE 0 END) AS latency_sum_ms,
+		SUM(CASE WHEN events.failed = 0 AND events.latency_ms > 0 THEN 1 ELSE 0 END) AS latency_sample_count
 	FROM ranged_events AS events
 	JOIN cpa_api_keys AS keys ON keys.api_key = TRIM(events.api_group_key)
 	GROUP BY keys.id, bucket_key

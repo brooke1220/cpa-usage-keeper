@@ -11,6 +11,8 @@
 - 已发布的 `20261009_remove_ranking` 迁移保持原样；后续的 `20261021_restore_local_ranking` 迁移及其注册必须保留。数据库适配使用新增迁移，不删除历史迁移记录来重跑。
 - 不重新加入清除 `cli-proxy-usage-ranking-preferences-v1` 或重置已保存 `ranking` 页签的启动代码。
 - 排行中的别名编辑必须保留 `key_alias_source = manual`，以免 CPA 名称自动导入覆盖用户手动修改或清空的别名。
+- 保留线上空榜修复：有请求和 Token 的 Key 不应因未上报 TTFT 等可选指标被整体过滤；缺失指标显示 `—` 并使用中性贡献，完整样本维持原评分。聚合服务启动时立即执行一次，成功请求的总耗时统计不依赖 TTFT。
+- v2 启动交接 `internal/app/startup_pipeline.go` 的 `installReadyApp` 必须移交 `LocalRanking`。仅在 `buildReadyApp` 创建服务、注册 Router 或在后台启动方法中写启动分支都不够；漏交接会导致接口正常但后台永不聚合。保留真实 `RunContext` 启动回归测试。
 
 ## 合并与冲突处理
 

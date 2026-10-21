@@ -36,6 +36,9 @@ export function LocalRankingPage({ refreshToken = 0, onAuthRequired, onProfileUp
 
   const board = data.leaderboard?.period === period && data.leaderboard.metric === metric ? data.leaderboard : null;
   const rows = board?.entries.slice(0, 100) ?? [];
+  const hasMissingMeasurements = metric === 'overall' && rows.some(entry =>
+    ['cache_read_rate', 'ttft_average', 'latency_average'].some(key => entry.metrics?.[key as 'cache_read_rate' | 'ttft_average' | 'latency_average'] === undefined));
+  const sampleMetric = metric === 'ttft_average' || metric === 'latency_average' || metric === 'cache_read_rate';
   const explanation = metric === 'overall' && data.leaderboard?.metric === metric && data.leaderboard.score_explanation?.version === 2
     ? data.leaderboard.score_explanation.texts : null;
   const language = i18n.resolvedLanguage || i18n.language;
@@ -91,11 +94,12 @@ export function LocalRankingPage({ refreshToken = 0, onAuthRequired, onProfileUp
             {board.stale && <span className={styles.staleBadge} data-ranking-stale>{t('ranking.stale')} · {board.period_key}</span>}
             <span>{t('ranking.updated_at', { time: updatedAt ?? '' })}</span>
           </div>}
+          {hasMissingMeasurements && <p className={styles.boardMeta} data-ranking-missing-measurements>{t('ranking.local_missing_measurements')}</p>}
         </div>
       </header>
       {data.leaderboardLoading && !board ? <div className={styles.loadingState} role="status"><LoadingSpinner size={20} /><span>{t('ranking.leaderboard_loading')}</span></div>
         : data.leaderboardError && !board ? <div className={styles.errorState} role="alert"><p>{error}</p><Button variant="secondary" appearance="action" onClick={() => void data.refreshLeaderboard()}>{t('common.retry')}</Button></div>
-          : rows.length === 0 ? <div className={styles.emptyState}><strong>{t('ranking.local_empty_title')}</strong><p>{t('ranking.local_empty_description')}</p></div>
+          : rows.length === 0 ? <div className={styles.emptyState}><strong>{t('ranking.local_empty_title')}</strong><p>{t(sampleMetric ? 'ranking.local_missing_samples' : 'ranking.local_empty_description')}</p></div>
             : <RankingLeaderboardResults scope="local" metric={metric} entries={rows} onEditLocalProfile={openProfile} />}
     </article>
     <Modal open={editing !== null} title={t('ranking.local_profile_edit')} onClose={() => { if (!saving) setEditing(null); }}

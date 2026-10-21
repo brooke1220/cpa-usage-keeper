@@ -106,15 +106,22 @@ func localMetricValue(row localRankingPopulationRow, metric LeaderboardMetric) (
 }
 
 func localLeaderboardMetricsMap(row localRankingPopulationRow) map[LeaderboardMetric]int64 {
-	return map[LeaderboardMetric]int64{
-		MetricTotalTokens:    row.TotalTokens,
-		MetricRequestCount:   row.RequestCount,
-		MetricCacheReadRate:  scaledRatio(row.CacheReadTokens, row.InputTokens, 1_000_000),
-		MetricTTFTAverage:    scaledRatio(row.TTFTSumMS, row.TTFTSampleCount, 1_000),
-		MetricLatencyAverage: scaledRatio(row.LatencySumMS, row.LatencySampleCount, 1_000),
-		MetricPeakTPM:        row.Peak5MTotalTokens,
-		MetricPeakRPM:        row.Peak5MRequestCount,
+	metrics := map[LeaderboardMetric]int64{
+		MetricTotalTokens:  row.TotalTokens,
+		MetricRequestCount: row.RequestCount,
+		MetricPeakTPM:      row.Peak5MTotalTokens,
+		MetricPeakRPM:      row.Peak5MRequestCount,
 	}
+	if row.InputTokens > 0 {
+		metrics[MetricCacheReadRate] = scaledRatio(row.CacheReadTokens, row.InputTokens, 1_000_000)
+	}
+	if row.TTFTSampleCount > 0 && row.TTFTSumMS > 0 {
+		metrics[MetricTTFTAverage] = scaledRatio(row.TTFTSumMS, row.TTFTSampleCount, 1_000)
+	}
+	if row.LatencySampleCount > 0 && row.LatencySumMS > 0 {
+		metrics[MetricLatencyAverage] = scaledRatio(row.LatencySumMS, row.LatencySampleCount, 1_000)
+	}
+	return metrics
 }
 
 func scaledRatio(numerator, denominator, scale int64) int64 {

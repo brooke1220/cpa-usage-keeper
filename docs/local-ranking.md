@@ -20,11 +20,33 @@
 
 ### 本地数据与更新
 
-- 保留独立本地聚合服务。后台每 5 分钟聚合一次，首次启动等待一个周期；前端每 60 秒读取榜单，隐藏标签页暂停轮询。
+- 保留独立本地聚合服务。启动时立即聚合一次，之后每 5 分钟聚合；前端每 60 秒读取榜单，隐藏标签页暂停轮询。
 - 保留日、月快照和完整日结算方式。当前实现首次启用从今天开始，不回填启用前的排行周期。
 - 头像保存在 `cpa_api_keys.local_ranking_avatar_id`，排行快照保存在 `local_ranking_period_stats`。
 - 在排行弹窗修改或清空别名时，写入 `key_alias_source = manual`，与设置页的别名来源规则一致。
 - 不恢复社区状态、参与/退出、排名中心连接、身份密钥、上传接口或上报任务。
+
+## 线上空榜问题与修复（2026-10-21）
+
+用户部署后反馈：概览当天有 8,533 次请求、1.31B Token，但“综合／今日”显示空榜。未直接读取用户的线上数据库；本地已通过真实事件入库复现相同现象：同一批请求在总 Token 榜存在，在综合榜全部被过滤。
+
+用户继续反馈等待超过五分钟仍未聚合后，核对生产启动链路发现更直接的启动漏接：`buildReadyApp` 虽然创建了排行服务和后台任务，但 `startup_pipeline.go` 的 `installReadyApp` 没有将 `ready.LocalRanking` 移交给实际运行的 App，导致后台启动分支始终跳过它。接口仍持有服务对象，可以正常返回 HTTP 200 空榜；这不能证明后台任务已运行，也不能据此归因为缺少 TTFT。这是已在真实 `Initialize` 路径中复现的启动缺陷。
+
+另有独立的数据兼容缺陷：旧版综合榜要求每个 Key 同时有输入 Token、TTFT、总耗时、峰值等完整指标。CPA 未提供 TTFT 或旧事件字段缺失时，有用量的 Key 会被整体排除。原 SQL 还将总耗时样本统计绑定在 TTFT 有值的条件上。首次后台聚合延迟 5 分钟则会额外造成部署初期空榜。
+
+后续合并必须保留以下修复：
+
+- 在 `installReadyApp` 明确移交 `LocalRanking`，使生产 `RunContext` 真正启动后台聚合；不可仅检查构造函数返回值或直接运行服务测试。
+- 有请求、结果计数和 Token 的 Key 可以参与综合榜，不因缺少可选指标而整体消失。
+- 保留原评分权重及完整样本的评分结果；缺失缓存或耗时指标只使用中性贡献，不进入对应指标的归一化样本集合，不能按零延迟加分。
+- 表格缺失指标省略对应数值并显示 `—`，不能伪造 `0ms`。输入 Token 有值且缓存读取为零时，零缓存率仍是有效值。
+- 成功请求的总耗时按自身有效性独立统计，不依赖是否上报 TTFT；失败耗时不计入平均总耗时。
+- 后台服务启动时立即聚合一次，再进入五分钟周期；不清库、不重置迁移、不要求重新采集已有当天事件。
+- 对单项指标无有效样本的情况说明原因，并提示可查看总 Token 或请求数；不能总是提示“下一轮聚合后会自动显示”。
+
+回归依据：`internal/app/test/local_ranking_startup_test.go`、`internal/ranking/test/local_missing_samples_test.go`、`internal/ranking/local_overall_test.go`、`internal/ranking/test/local_runner_test.go` 和 `web/src/features/ranking/test/LocalRankingPage.test.tsx`。真实启动测试模拟已有事件、恢复迁移尚未执行的 v2 数据库，经过 `RunContext` 自动迁移、服务交接与后台启动后，要求 HTTP 综合榜在数秒内返回已有数据。线上缺失的具体字段仍以实际接口／数据库为准；不要把截图直接当作已核验的线上 SQL 诊断。
+
+`20261021_restore_local_ranking` 由正常启动流程自动执行，修复后台交接和缺失指标处理不需要新增数据库迁移。不能通过删迁移记录、手工插入排行快照、清库或单纯重启旧镜像来修复这个启动漏接。
 
 ## 为什么容易在合并时丢失
 
@@ -55,6 +77,7 @@
 | 请求与前端状态 | `web/src/features/ranking/api.ts`、`hooks/useLocalRankingData.ts`、`preferences.ts` | 仅访问本地接口；切换、刷新、缓存、资料编辑、认证失效和偏好保存正常。 |
 | 语言 | `web/src/i18n/index.ts` | 导航和排行使用的英文、简体中文、繁体中文文案存在。 |
 | 后端启动装配 | `internal/app/app.go` | 构造 `LocalRankingService` 和 `LocalRankingRunner`，将服务传入 Router，并启动／停止后台任务。 |
+| v2 启动交接 | `internal/app/startup_pipeline.go` | `installReadyApp` 将 `ready.LocalRanking` 移交给运行中的 App；缺少这一项会让接口正常而后台永不聚合。 |
 | 受保护路由 | `internal/api/router.go`、`internal/ranking/httpapi/` | 在管理员保护下注册本地榜单读取及资料修改接口，支持部署子路径。 |
 | 本地算法与快照 | `internal/ranking/local_*.go`、`types.go` | 保留原评分、排序、样本筛选、峰值口径和完整日结算逻辑。 |
 | 数据模型 | `internal/entities/local_ranking_period_stat.go`、`cpa_api_key.go`、`all.go` | 快照实体、可选头像字段和核心实体注册不能丢失。 |
@@ -96,6 +119,7 @@ git diff --check
 重点回归测试包括：
 
 - `internal/ranking/test/`：原聚合、完整日结算、综合评分、排序、头像／别名编辑和后台任务周期。
+- `internal/app/test/local_ranking_startup_test.go`：生产启动交接、自动恢复迁移、已有当天事件自动聚合，并通过真实 HTTP 接口读到榜单。
 - `internal/api/test/local_ranking_routes_test.go`：部署前缀、认证边界和社区接口仍未注册。
 - `internal/repository/migration/test/restore_local_ranking_test.go`：在已经移除排行的 v2 数据库上恢复结构，不改已有 Key 别名，重启不丢快照。
 - `web/src/features/ranking/` 中的测试：旧版前三名及完整表格、周期控件、资料编辑回调、偏好、刷新和请求缓存。

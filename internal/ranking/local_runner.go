@@ -43,7 +43,12 @@ func (r *LocalRankingRunner) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// 首次聚合等待一个完整周期，让 usage inbox 与 metadata 启动追赶先行。
+	// Use retained usage immediately after deployment; later intervals catch up
+	// events and key metadata still arriving during startup.
+	if ctx.Err() != nil {
+		return nil
+	}
+	r.runOnce(ctx)
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {

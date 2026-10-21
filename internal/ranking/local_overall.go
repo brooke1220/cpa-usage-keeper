@@ -14,9 +14,9 @@ const (
 
 func localOverallEligible(row localRankingPopulationRow) bool {
 	outcomes := row.SuccessCount + row.FailureCount
-	return row.RequestCount > 0 && outcomes > 0 && row.TotalTokens > 0 && row.InputTokens > 0 &&
-		row.TTFTSampleCount > 0 && row.TTFTSumMS > 0 && row.LatencySampleCount > 0 && row.LatencySumMS > 0 &&
-		row.Peak5MRequestCount > 0 && row.Peak5MTotalTokens > 0
+	// CPA does not always report TTFT, latency, or input-token breakdowns.
+	// Missing measurements must not discard otherwise valid local usage.
+	return row.RequestCount > 0 && outcomes > 0 && row.TotalTokens > 0
 }
 
 func scoreLocalOverallPopulation(rows []localRankingPopulationRow) []int64 {
@@ -41,16 +41,22 @@ func scoreLocalOverallPopulation(rows []localRankingPopulationRow) []int64 {
 		latency[index] = float64(scaledRatio(row.LatencySumMS, row.LatencySampleCount, 1_000))
 		peakTokens[index] = math.Log1p(float64(row.Peak5MTotalTokens) / 5)
 		peakRequests[index] = math.Log1p(float64(row.Peak5MRequestCount) / 5)
-		cacheSamples[index] = row.RequestCount
-		ttftSamples[index] = row.TTFTSampleCount
-		latencySamples[index] = row.LatencySampleCount
+		if row.InputTokens > 0 {
+			cacheSamples[index] = row.RequestCount
+		}
+		if row.TTFTSumMS > 0 {
+			ttftSamples[index] = row.TTFTSampleCount
+		}
+		if row.LatencySumMS > 0 {
+			latencySamples[index] = row.LatencySampleCount
+		}
 	}
 
 	tokenUtility := localRobustUtilities(totalTokens, true)
 	requestUtility := localRobustUtilities(requests, true)
-	cacheUtility := localShrinkUtilitiesToNeutral(localRobustUtilities(cacheRates, true), cacheSamples)
-	ttftUtility := localShrinkUtilitiesToNeutral(localRobustUtilities(ttft, false), ttftSamples)
-	latencyUtility := localShrinkUtilitiesToNeutral(localRobustUtilities(latency, false), latencySamples)
+	cacheUtility := localMeasuredUtilities(cacheRates, cacheSamples, true)
+	ttftUtility := localMeasuredUtilities(ttft, ttftSamples, false)
+	latencyUtility := localMeasuredUtilities(latency, latencySamples, false)
 	peakTokenUtility := localRobustUtilities(peakTokens, true)
 	peakRequestUtility := localRobustUtilities(peakRequests, true)
 
@@ -64,6 +70,29 @@ func scoreLocalOverallPopulation(rows []localRankingPopulationRow) []int64 {
 		scores[index] = localOverallScore([5]float64{workload, reliability, response, cache, peak})
 	}
 	return scores
+}
+
+// Normalize only measured values. A missing duration is neither zero latency
+// nor a member of the comparison population; its score contribution is neutral.
+// With complete measurements this is identical to the original algorithm.
+func localMeasuredUtilities(values []float64, samples []int64, higherIsBetter bool) []float64 {
+	measured := make([]float64, 0, len(values))
+	for index, value := range values {
+		if samples[index] > 0 {
+			measured = append(measured, value)
+		}
+	}
+	utilities := localRobustUtilities(measured, higherIsBetter)
+	result := make([]float64, len(values))
+	next := 0
+	for index := range values {
+		result[index] = 0.5
+		if samples[index] > 0 {
+			result[index] = utilities[next]
+			next++
+		}
+	}
+	return localShrinkUtilitiesToNeutral(result, samples)
 }
 
 func localOverallScore(utilities [5]float64) int64 {
@@ -187,9 +216,9 @@ func localOverallScoreExplanation() *ScoreExplanation {
 	return &ScoreExplanation{
 		Version: 2,
 		Texts: map[string]string{
-			"en":    "Local overall score combines workload 30% (tokens 20%, requests 10%), reliability 30% (95% Wilson lower bound), response 25% (TTFT 15%, latency 10%), cache efficiency 10%, and peak capacity 5% (TPM 3%, RPM 2%). It is normalized only among API keys in this Keeper and period, and is shown on a 0–100 scale.",
-			"zh":    "本地综合分由使用规模 30%（Token 20%、请求数 10%）、可靠性 30%（成功率的 95% Wilson 下界）、响应体验 25%（首字延迟 15%、总延迟 10%）、缓存效率 10% 和峰值能力 5%（TPM 3%、RPM 2%）组成。分数仅在当前 Keeper、当前周期的 API Key 之间归一化，范围为 0–100。",
-			"zh-TW": "本地綜合分由使用規模 30%（Token 20%、請求數 10%）、可靠性 30%（成功率的 95% Wilson 下界）、回應體驗 25%（首字延遲 15%、總延遲 10%）、快取效率 10% 和峰值能力 5%（TPM 3%、RPM 2%）組成。分數僅在目前 Keeper、目前週期的 API Key 之間正規化，範圍為 0–100。",
+			"en":    "Local overall score combines workload 30% (tokens 20%, requests 10%), reliability 30% (95% Wilson lower bound), response 25% (TTFT 15%, latency 10%), cache efficiency 10%, and peak capacity 5% (TPM 3%, RPM 2%). It is normalized only among API keys in this Keeper and period, and is shown on a 0–100 scale. Missing cache or duration measurements use a neutral contribution and display as —; they do not exclude the API key or count as zero latency.",
+			"zh":    "本地综合分由使用规模 30%（Token 20%、请求数 10%）、可靠性 30%（成功率的 95% Wilson 下界）、响应体验 25%（首字延迟 15%、总延迟 10%）、缓存效率 10% 和峰值能力 5%（TPM 3%、RPM 2%）组成。分数仅在当前 Keeper、当前周期的 API Key 之间归一化，范围为 0–100。缺失的缓存或耗时指标按中性贡献处理并显示为 —，不会排除整个 API Key，也不会算作零延迟。",
+			"zh-TW": "本地綜合分由使用規模 30%（Token 20%、請求數 10%）、可靠性 30%（成功率的 95% Wilson 下界）、回應體驗 25%（首字延遲 15%、總延遲 10%）、快取效率 10% 和峰值能力 5%（TPM 3%、RPM 2%）組成。分數僅在目前 Keeper、目前週期的 API Key 之間正規化，範圍為 0–100。缺失的快取或耗時指標按中性貢獻處理並顯示為 —，不會排除整個 API Key，也不會算作零延遲。",
 		},
 	}
 }

@@ -100,6 +100,9 @@ func (a *App) Initialize(ctx context.Context) error {
 func (a *App) installReadyApp(ready *App) {
 	a.Poller, a.RedisIngest, a.RedisProcess = ready.Poller, ready.RedisIngest, ready.RedisProcess
 	a.CPAErrors, a.UsageAggregation = ready.CPAErrors, ready.UsageAggregation
+	// The router keeps the service, but its runner must also reach the live App.
+	// Otherwise ranking reads succeed while snapshots are never generated.
+	a.LocalRanking = ready.LocalRanking
 	a.Maintenance = ready.Maintenance
 	a.MetadataSync, a.QuotaService, a.QuotaAutoRefresh = ready.MetadataSync, ready.QuotaService, ready.QuotaAutoRefresh
 	a.BackupMaintenance, a.RecentUsageCache = ready.BackupMaintenance, ready.RecentUsageCache
