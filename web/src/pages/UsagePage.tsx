@@ -1,6 +1,7 @@
 import { ChartLifecycleProvider, useChartRefresh, type ChartRefreshSignal } from '@/components/usage/charts/chartLifecycle';
 import { CredentialEditModal } from '@/components/usage/credentials/CredentialEditModal';
 import { APIKeyTimeUsagePage } from '@/features/api-key-time-usage/APIKeyTimeUsagePage';
+import { LocalRankingPage } from '@/features/ranking/LocalRankingPage';
 import { CPA_API_KEY_NAMES_PREFIX, matchCPAApiKeyNames, readAccessibleCPAApiKeyNames, type CPAApiKeyAliasImport } from '@/lib/cpaApiKeyNames';
 import { UsageComparisonCharts } from '@/components/usage/UsageComparisonCharts';
 import type { ModelSpeedRefreshSignal } from '@/components/usage/model-speed/modelSpeedAnimation';
@@ -80,6 +81,7 @@ const USAGE_TAB_LABEL_KEYS: Record<UsageTab, string> = {
   realtime: 'usage_stats.tab_realtime',
   analysis: 'usage_stats.tab_analysis',
   'api-key-usage': 'usage_stats.tab_usage',
+  ranking: 'usage_stats.tab_ranking',
   events: 'usage_stats.tab_events',
   'auth-files': 'usage_stats.tab_auth_files',
   'ai-provider': 'usage_stats.tab_ai_provider',
@@ -145,7 +147,7 @@ export const getCredentialSectionVisibility = (tab: UsageTab) => ({
   showAiProvider: tab === 'ai-provider',
 });
 
-export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'realtime' && tab !== 'api-key-usage' && tab !== 'settings' && !getCredentialSectionVisibility(tab).enabled;
+export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'realtime' && tab !== 'api-key-usage' && tab !== 'ranking' && tab !== 'settings' && !getCredentialSectionVisibility(tab).enabled;
 
 export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'realtime' || tab === 'api-key-usage' || shouldShowRangeControls(tab);
 
@@ -1774,7 +1776,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([loadEventFilterOptions(), loadEvents()]);
       return;
     }
-    if (activeTab === 'api-key-usage') {
+    if (activeTab === 'api-key-usage' || activeTab === 'ranking') {
       setAPIKeyTimeUsageRefresh(value => value + 1);
       return;
     }
@@ -2397,6 +2399,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
             {activeTab === 'api-key-usage' && (
               <APIKeyTimeUsagePage apiKeyId={requestApiKeyId} refreshToken={apiKeyTimeUsageRefresh} onAuthRequired={onAuthRequired} />
+            )}
+
+            {activeTab === 'ranking' && (
+              <LocalRankingPage refreshToken={apiKeyTimeUsageRefresh} onAuthRequired={onAuthRequired} onProfileUpdated={() => { void loadApiKeyOptions(); }} />
             )}
 
             {credentialSectionVisibility.enabled && (

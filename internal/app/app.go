@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"cpa-usage-keeper/internal/ranking"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +72,7 @@ type App struct {
 	CPAErrors Runner
 	// UsageAggregation 是唯一串行调度各类派生聚合事务的后台 runner。
 	UsageAggregation  Runner
+	LocalRanking      Runner
 	Maintenance       *StorageCleanupRunner
 	MetadataSync      *MetadataSyncRunner
 	QuotaService      QuotaRunner
@@ -156,6 +158,14 @@ func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, 
 	apiKeyTimeUsageService, err := service.NewAPIKeyTimeUsageService(db, service.APIKeyTimeUsageOptions{Clock: workClock})
 	if err != nil {
 		return nil, fmt.Errorf("initialize API key time usage: %w", err)
+	}
+	localRankingService, err := ranking.NewLocalRankingService(db, ranking.LocalRankingServiceOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize local ranking: %w", err)
+	}
+	localRankingRunner, err := ranking.NewLocalRankingRunner(localRankingService)
+	if err != nil {
+		return nil, fmt.Errorf("initialize local ranking runner: %w", err)
 	}
 	// 单 writer aggregation runner 只维护 rollups/Identity，并在 App.Run 时主动追平。
 	usageAggregationRunner := poller.NewUsageAggregationRunner(db)
@@ -247,6 +257,7 @@ func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, 
 		RedisProcess:      redisProcessRunner,
 		CPAErrors:         redisErrorIngestRunner,
 		UsageAggregation:  usageAggregationRunner,
+		LocalRanking:      localRankingRunner,
 		Maintenance:       NewStorageCleanupRunner(syncService),
 		MetadataSync:      metadataSyncRunner,
 		QuotaService:      quotaService,
@@ -277,6 +288,7 @@ func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, 
 				CredentialPriority: credentialPriorityService,
 				RequestLogs:        requestLogService,
 				APIKeyTimeUsage:    apiKeyTimeUsageService,
+				LocalRanking:       localRankingService,
 				WorkHours:          workhours.NewService(db, workClock),
 				Status: api.StatusRouteConfig{
 					CPAPublicURL:               cfg.CPAPublicURL,
@@ -430,6 +442,13 @@ func (a *App) startReadyBackgroundTasks(ctx context.Context) {
 		a.startBackgroundTask(func() {
 			if err := a.MetadataSync.Run(ctx); err != nil {
 				logrus.Errorf("metadata sync stopped: %v", err)
+			}
+		})
+	}
+	if a.LocalRanking != nil {
+		a.startBackgroundTask(func() {
+			if err := a.LocalRanking.Run(ctx); err != nil {
+				logrus.Errorf("local ranking aggregation stopped: %v", err)
 			}
 		})
 	}

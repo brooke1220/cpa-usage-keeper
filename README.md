@@ -12,6 +12,8 @@
 
 <h1 align="center">CPA Usage Keeper</h1>
 
+> This custom branch preserves the original local API Key leaderboard. Before merging upstream or resolving conflicts, read the [local ranking maintenance record](./docs/local-ranking.md) and [repository maintenance instructions](./AGENTS.md).
+
 <p align="center">Every flow leaves a trace.</p>
 
 <p align="center">

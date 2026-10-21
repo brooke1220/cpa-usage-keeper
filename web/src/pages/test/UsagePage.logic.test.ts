@@ -792,6 +792,7 @@ for (const [tab, expected] of [
   ['realtime', false],
   ['analysis', true],
   ['api-key-usage', false],
+  ['ranking', false],
   ['events', true],
   ['auth-files', false],
   ['ai-provider', false],
@@ -807,6 +808,7 @@ for (const [tab, expected] of [
   ['realtime', true],
   ['analysis', true],
   ['api-key-usage', true],
+  ['ranking', false],
   ['events', true],
   ['auth-files', false],
   ['ai-provider', false],
@@ -826,6 +828,7 @@ describe('UsagePage tab labels', () => {
       'translated:usage_stats.tab_realtime',
       'translated:usage_stats.tab_analysis',
       'translated:usage_stats.tab_usage',
+      'translated:usage_stats.tab_ranking',
       'translated:usage_stats.tab_events',
       'translated:usage_stats.tab_auth_files',
       'translated:usage_stats.tab_ai_provider',
@@ -836,7 +839,7 @@ describe('UsagePage tab labels', () => {
   it('includes API key usage in the navigation', () => {
     const values = getUsageTabOptions((key) => key).map((option) => option.value);
 
-    expect(values).toEqual(['overview', 'realtime', 'analysis', 'api-key-usage', 'events', 'auth-files', 'ai-provider', 'settings']);
+    expect(values).toEqual(['overview', 'realtime', 'analysis', 'api-key-usage', 'ranking', 'events', 'auth-files', 'ai-provider', 'settings']);
   });
 });
 

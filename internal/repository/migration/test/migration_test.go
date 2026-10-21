@@ -99,6 +99,7 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20261012_usage_api_key_time_checkpoint",
 		"20261012_usage_api_key_time_stats",
 		"20261012_cpa_api_key_alias_source",
+		"20261021_restore_local_ranking",
 	}
 	assertStringSlicesEqual(t, want, got)
 }

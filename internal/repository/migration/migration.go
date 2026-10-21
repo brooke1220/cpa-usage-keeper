@@ -109,6 +109,7 @@ const (
 	migrationAddCPAAPIKeyAliasSource = "20261012_cpa_api_key_alias_source"
 	// migrationRecoverExecutionUsageEvents 以短事务回填事件标识并重新排队旧入口误拒绝的执行消息。
 	migrationRecoverExecutionUsageEvents = "20261018_recover_execution_usage_events"
+	migrationRestoreLocalRanking         = "20261021_restore_local_ranking"
 )
 
 type schemaMigration struct {
@@ -329,6 +330,7 @@ func orderedMigrations() []databaseMigration {
 		// 回填逐页提交，外层长事务会破坏断点续跑语义。
 		{version: migrationUsageAPIKeyTimeStats, run: usageAPIKeyTimeStatsMigration, disableTransaction: true},
 		{version: migrationAddCPAAPIKeyAliasSource, run: addCPAAPIKeyAliasSourceMigration},
+		{version: migrationRestoreLocalRanking, run: restoreLocalRankingMigration},
 	}
 }
 

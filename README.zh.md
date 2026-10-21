@@ -29,6 +29,8 @@
 
 **[已有 CPA，部署 Keeper](#keeper-only) · [首次部署 CPA + Keeper](#cpa--keeper) · [查看配置](#配置)**
 
+> 本地定制分支保留旧版本地 API Key 排行。同步上游或解决冲突前，请阅读 [本地排行维护记录](./docs/local-ranking.md) 和 [仓库维护约定](./AGENTS.md)，避免再次丢失排行页面及其后端接入。
+
 ## 界面预览
 
 <table>

@@ -6,6 +6,8 @@
 .worktrees/
 plans/
 AGENTS.md
+# Keep the root fork-maintenance instructions in version control.
+!/AGENTS.md
 
 # local environment files
 .env

@@ -21,12 +21,14 @@ describe('App usage-page route authorization', () => {
     expect(shouldNormalizeRolePath('admin', '/auth-files/')).toBe(true);
     expect(getRoleTargetPath('admin', '/request-events')).toBe('/request-events');
     expect(getRoleTargetPath('admin', '/analysis')).toBe('/analysis');
+    expect(getRoleTargetPath('admin', '/ranking')).toBe('/ranking');
     expect(getRoleTargetPath('admin', '/auth-files/settings')).toBe('/');
     expect(getRoleTargetPath('admin', '//example.com/auth-files')).toBe('/');
   });
 
   it('keeps API key viewers isolated from administrator routes', () => {
     expect(getRoleTargetPath('api_key_viewer', '/auth-files')).toBe('/key-overview');
+    expect(getRoleTargetPath('api_key_viewer', '/ranking')).toBe('/key-overview');
     expect(shouldNormalizeRolePath('api_key_viewer', '/auth-files')).toBe(true);
     expect(shouldNormalizeRolePath('api_key_viewer', '/key-overview')).toBe(false);
     expect(getRoleTargetPath('api_key_viewer', '/key-analysis')).toBe('/key-analysis');

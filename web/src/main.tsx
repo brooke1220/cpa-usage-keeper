@@ -23,19 +23,6 @@ if (!faviconEl.parentNode) {
 function Root() {
   const initializeTheme = useThemeStore((state) => state.initializeTheme);
 
-  useEffect(() => {
-    try {
-      const storage = window.localStorage;
-      storage.removeItem('cli-proxy-usage-ranking-preferences-v1');
-      storage.removeItem('cli-proxy-usage-ranking-scope-v1');
-      if (storage.getItem('cli-proxy-usage-tab-v1') === 'ranking') {
-        storage.removeItem('cli-proxy-usage-tab-v1');
-      }
-    } catch {
-      // 浏览器拒绝存储访问时，结束废弃排名偏好的清理。
-    }
-  }, []);
-
   useEffect(() => initializeTheme(), [initializeTheme]);
 
   return <StartupGate />;
