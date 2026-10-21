@@ -138,6 +138,25 @@ func TestUsageAPIKeyTimeMigrationBackfillMatchesRuntimeAggregation(t *testing.T)
 	}
 }
 
+func TestUsageAPIKeyTimeMigrationBackfillsWithoutPricingColumns(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.Local)
+	db := prepareUsageAPIKeyTimeMigrationDatabase(t, now, []entities.UsageEvent{{
+		ID: 1, EventKey: "legacy-api-key-time", APIGroupKey: "sk-legacy", Timestamp: now, TotalTokens: 42,
+	}})
+	for _, column := range []string{"cost_usd", "cost_available"} {
+		if err := db.Migrator().DropColumn(&entities.UsageEvent{}, column); err != nil {
+			t.Fatalf("remove unpublished pricing column %s: %v", column, err)
+		}
+	}
+	if err := migration.Run(db); err != nil {
+		t.Fatalf("backfill legacy events without pricing columns: %v", err)
+	}
+	rows := loadUsageAPIKeyTimeRows(t, db)
+	if len(rows) != 1 || rows[0].TotalTokens != 42 {
+		t.Fatalf("legacy usage was not backfilled: %+v", rows)
+	}
+}
+
 func TestCPAAPIKeyAliasSourceMigrationAddsEmptySource(t *testing.T) {
 	db := openUnmigratedTestDatabase(t)
 	if err := db.Exec("CREATE TABLE cpa_api_keys (id integer PRIMARY KEY AUTOINCREMENT, api_key text, display_key text, key_alias text, local_ranking_avatar_id integer, is_deleted numeric, last_synced_at datetime, created_at datetime, updated_at datetime)").Error; err != nil {

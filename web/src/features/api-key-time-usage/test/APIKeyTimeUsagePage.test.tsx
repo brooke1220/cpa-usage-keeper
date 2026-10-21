@@ -67,7 +67,7 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('[data-range-duration="work"]')?.getAttribute('title')).toContain('5,001,000 ms');
     expect(container.querySelector('[data-range-duration="off"]')?.getAttribute('title')).toContain('api_key_time_usage.duration_average');
     expect(container.querySelector('[data-range-duration="off"]')?.getAttribute('title')).toContain('api_key_time_usage.duration_samples');
-    expect(container.querySelector('[data-ranking-avatar-id="12"]')).not.toBeNull();
+    expect(container.querySelector('[data-time-usage-avatar-id="12"]')).not.toBeNull();
     expect([...container.querySelectorAll('strong')].some(node => node.textContent === 'Team Alpha')).toBe(true);
     expect(container.textContent).toContain('api_key_time_usage.deleted');
     expect(container.querySelector('[data-day-rule]')?.textContent).toContain('api_key_time_usage.day_note');

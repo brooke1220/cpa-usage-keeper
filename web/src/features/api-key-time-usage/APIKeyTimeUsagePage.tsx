@@ -4,7 +4,6 @@ import { ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 import { IconTimer } from '@/components/ui/icons';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { RankingAvatar } from '@/features/ranking/components/RankingAvatar';
 import { formatCompactTokenValue } from '@/utils/usage';
 import { formatDurationMs } from '@/utils/usage/latency';
 import {
@@ -24,6 +23,7 @@ import {
 import { fetchWorkHours } from './api';
 import { useAPIKeyTimeUsage } from './useAPIKeyTimeUsage';
 import type { TimeUsageDay, TimeUsageKey, TimeUsageSort, TimeUsageTotals } from './types';
+import avatarCatalogURL from './avatar-catalog.webp';
 import styles from './APIKeyTimeUsagePage.module.scss';
 
 interface Props { apiKeyId?: string; refreshToken?: number; onAuthRequired?: () => void }
@@ -39,6 +39,20 @@ const totalAttribute = (column: SummaryColumn) => column === 'total_tokens' ? 't
 const columnPeriod = (column: SummaryColumn): Period | undefined => column === 'daytime_tokens' ? 'work' : column === 'after_hours_tokens' ? 'off' : undefined;
 
 const keyName = (key: TimeUsageKey) => key.display_name || key.key_alias || key.display_key;
+
+function TimeUsageAvatar({ avatarID }: { avatarID: number }) {
+  const index = avatarID - 1;
+  return <span
+    className={styles.avatar}
+    style={{
+      backgroundImage: `url(${avatarCatalogURL})`,
+      backgroundPosition: `${(index % 10) * 100 / 9}% ${Math.floor(index / 10) * 100 / 9}%`,
+      backgroundSize: '1000% 1000%',
+    }}
+    aria-hidden="true"
+    data-time-usage-avatar-id={avatarID}
+  />;
+}
 
 const compactUnits = (locale: string) => {
   const lang = locale.toLowerCase();
@@ -355,7 +369,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
             return <tr key={row.key.id} data-time-usage-key={row.key.id}>
               <th scope="row" className={styles.nameCol} title={name}>
                 <div className={styles.participant}>
-                  <span className={styles.avatarFrame}><RankingAvatar avatarID={timeUsageAvatarID(row.key.id, row.key.avatar_id)} name={name} decorative /></span>
+                  <span className={styles.avatarFrame}><TimeUsageAvatar avatarID={timeUsageAvatarID(row.key.id, row.key.avatar_id)} /></span>
                   <span className={styles.identity}>
                     <strong>{name}</strong>
                     {row.key.is_deleted && <em>{text('deleted')}</em>}

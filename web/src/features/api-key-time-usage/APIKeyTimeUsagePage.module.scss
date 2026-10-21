@@ -698,6 +698,16 @@ thead .totalCol[aria-sort='descending'] .sortMark {
   min-width: 0;
 }
 
+.avatar {
+  display: inline-block;
+  width: 100%;
+  aspect-ratio: 1;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-repeat: no-repeat;
+  background-color: var(--bg-tertiary);
+}
+
 .avatarFrame {
   width: 32px;
   height: 32px;

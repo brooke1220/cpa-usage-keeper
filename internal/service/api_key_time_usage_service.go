@@ -252,15 +252,12 @@ func finishAPIKeyTimeUsage(stats *dto.APIKeyTimeUsageStats, completed dto.APIKey
 func apiKeyTimeUsageKey(key entities.CPAAPIKey) dto.APIKeyTimeUsageKey {
 	return dto.APIKeyTimeUsageKey{
 		ID: strconv.FormatInt(key.ID, 10), KeyAlias: key.KeyAlias, DisplayKey: helper.CPAAPIKeyMaskedDisplayKey(key),
-		DisplayName: helper.CPAAPIKeyDisplayName(key), AvatarID: apiKeyTimeUsageAvatarID(key.ID, key.LocalRankingAvatarID), IsDeleted: key.IsDeleted,
+		DisplayName: helper.CPAAPIKeyDisplayName(key), AvatarID: apiKeyTimeUsageAvatarID(key.ID), IsDeleted: key.IsDeleted,
 	}
 }
 
-// Matches local ranking: a saved 1–66 avatar wins; otherwise the key ID picks a stable catalog avatar.
-func apiKeyTimeUsageAvatarID(id int64, stored *uint8) uint8 {
-	if stored != nil && *stored >= 1 && *stored <= 66 {
-		return *stored
-	}
+// The key ID picks a stable catalog avatar without depending on ranking profiles.
+func apiKeyTimeUsageAvatarID(id int64) uint8 {
 	if id <= 0 {
 		return 1
 	}

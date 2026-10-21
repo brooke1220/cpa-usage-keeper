@@ -87,7 +87,7 @@ func LoadAPIKeyTimeUsage(ctx context.Context, db *gorm.DB, window APIKeyTimeUsag
 			WHEN LENGTH(TRIM(api_key)) <= 9 THEN '*********'
 			ELSE SUBSTR(TRIM(api_key), 1, 3) || '*********' || SUBSTR(TRIM(api_key), -6)
 		END AS display_key`
-		if err := tx.Select("id, " + displayKeyProjection + ", key_alias, local_ranking_avatar_id, is_deleted").Order("id").Find(&keys).Error; err != nil {
+		if err := tx.Select("id, " + displayKeyProjection + ", key_alias, is_deleted").Order("id").Find(&keys).Error; err != nil {
 			return err
 		}
 		if !window.End.After(window.Start) {

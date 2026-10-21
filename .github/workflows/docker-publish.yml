@@ -1,16 +1,20 @@
 name: Publish release Docker image
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
 
 permissions:
   contents: read
   packages: write
 
 jobs:
+  release-policy:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-policy.yml
+
   docker:
+    needs: release-policy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -28,8 +32,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.repo.outputs.image }}
+          # Semver tags otherwise implicitly add latest, even for v1.
+          flavor: latest=false
           tags: |
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ needs.release-policy.outputs.latest == 'true' }}
             type=sha,prefix=sha-
             type=ref,event=tag,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}

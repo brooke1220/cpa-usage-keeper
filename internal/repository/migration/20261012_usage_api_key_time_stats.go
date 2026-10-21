@@ -150,7 +150,8 @@ func migrateUsageAPIKeyTimeBatch(db *gorm.DB, now time.Time, targetEventID int64
 			return nil
 		}
 		var events []entities.UsageEvent
-		if err := tx.Select(entities.UsageAggregationEventProjectionColumns).
+		// Keep the original projection so legacy schemas without stored pricing columns remain readable.
+		if err := tx.Select(legacyUsageLatencyEventProjectionColumns).
 			Where("id > ? AND id <= ?", checkpoint.LastAggregatedUsageEventID, targetEventID).
 			Order("id asc").
 			Limit(usageAPIKeyTimeMigrationBatchSize).

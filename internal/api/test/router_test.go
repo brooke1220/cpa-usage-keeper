@@ -398,6 +398,42 @@ func TestSubpathStaticRoutesServeOnlyUnderPrefix(t *testing.T) {
 	}
 }
 
+func TestAPIKeyUsageDeepLinkSurvivesStartupAndReadySwitch(t *testing.T) {
+	staticFS := testStaticFS(t, map[string]string{
+		"index.html": `<html><script>window.__APP_BASE_PATH__ = "__APP_BASE_PATH__";</script></html>`,
+	})
+	for _, basePath := range []string{"", "/cpa"} {
+		t.Run("base="+basePath, func(t *testing.T) {
+			config := AuthConfig{BasePath: basePath, FrameAncestorOrigins: []string{"https://cpamc.example"}}
+			shell := NewStartupShell(staticFS, config, basePath)
+			for _, phase := range []string{"opening", "ready"} {
+				if phase == "ready" {
+					if err := shell.ActivateReady(NewRouter(staticFS, nil, nil, nil, config, nil, basePath)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Run(phase, func(t *testing.T) {
+					resp := httptest.NewRecorder()
+					shell.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, basePath+"/api-key-usage", nil))
+					if resp.Code != http.StatusOK || !contains(resp.Body.String(), `window.__APP_BASE_PATH__ = "`+basePath+`";`) {
+						t.Fatalf("API key usage deep link: code=%d body=%s", resp.Code, resp.Body.String())
+					}
+					if resp.Header().Get("Cache-Control") != "no-store" || resp.Header().Get("Content-Security-Policy") != "frame-ancestors 'self' https://cpamc.example" {
+						t.Fatalf("API key usage HTML headers=%v", resp.Header())
+					}
+					if basePath != "" {
+						outside := httptest.NewRecorder()
+						shell.ServeHTTP(outside, httptest.NewRequest(http.MethodGet, "/api-key-usage", nil))
+						if outside.Code != http.StatusNotFound {
+							t.Fatalf("API key usage escaped base path: code=%d", outside.Code)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestCleanURLPathUsesSlashSemantics(t *testing.T) {
 	if cleaned := cleanURLPath("/cpa//dashboard/../assets/app.js"); cleaned != "/cpa/assets/app.js" {
 		t.Fatalf("expected slash-normalized URL path, got %q", cleaned)
