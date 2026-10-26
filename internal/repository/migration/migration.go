@@ -108,8 +108,9 @@ const (
 	// migrationAddCPAAPIKeyAliasSource 记录别名来源，自动导入不再覆盖管理员手动清空的别名。
 	migrationAddCPAAPIKeyAliasSource = "20261012_cpa_api_key_alias_source"
 	// migrationRecoverExecutionUsageEvents 以短事务回填事件标识并重新排队旧入口误拒绝的执行消息。
-	migrationRecoverExecutionUsageEvents = "20261018_recover_execution_usage_events"
-	migrationRestoreLocalRanking         = "20261021_restore_local_ranking"
+	migrationRecoverExecutionUsageEvents       = "20261018_recover_execution_usage_events"
+	migrationRestoreLocalRanking               = "20261021_restore_local_ranking"
+	migrationAddUsageEventEffectiveServiceTier = "20261023_usage_event_effective_service_tier"
 )
 
 type schemaMigration struct {
@@ -331,6 +332,9 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationUsageAPIKeyTimeStats, run: usageAPIKeyTimeStatsMigration, disableTransaction: true},
 		{version: migrationAddCPAAPIKeyAliasSource, run: addCPAAPIKeyAliasSourceMigration},
 		{version: migrationRestoreLocalRanking, run: restoreLocalRankingMigration},
+		// 新合入的上游迁移追加在本地已发布迁移之后，保留现有执行顺序。
+		{version: "20261020_add_auth_session_oidc_identity", run: addAuthSessionOIDCIdentityMigration},
+		{version: migrationAddUsageEventEffectiveServiceTier, run: addUsageEventEffectiveServiceTierMigration},
 	}
 }
 

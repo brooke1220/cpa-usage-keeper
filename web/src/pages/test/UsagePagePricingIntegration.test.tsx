@@ -17,6 +17,10 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('react-chartjs-2', () => ({ Bar: () => null, Chart: () => null, Doughnut: () => null, Line: () => null, Scatter: () => null }))
+vi.mock('@/features/api-key-time-usage/api', async (original) => ({
+  ...await original<typeof import('@/features/api-key-time-usage/api')>(),
+  fetchWorkHours: async () => ({ timezone: 'America/New_York', start: '09:00', end: '18:00', source: 'default' }),
+}))
 vi.mock('@/components/usage/analysis', async (original) => ({
   ...await original<typeof import('@/components/usage/analysis')>(),
   AnalysisPanel: ({ analysis, latencyDiagnostics }: { analysis: { cost_summary?: { total_cost_usd?: number } } | null; latencyDiagnostics: { total_points?: number } | null }) =>
@@ -63,7 +67,7 @@ describe('UsagePage complete pricing integration', () => {
     }], total_count: 1, page: 1, page_size: 50, total_pages: 1, has_more: false, next_cursor: null })
     api.fetchAnalysis.mockReset().mockResolvedValue({
       granularity: 'hourly', timezone: 'America/New_York', token_usage: [],
-      api_key_composition: [], model_composition: [], auth_files_composition: [], ai_provider_composition: [],
+      api_key_composition: [], model_composition: [], credentials_composition: [], ai_provider_composition: [],
       cost_summary: { total_cost_usd: 4.25, cost_available: true }, model_efficiency: [],
       heatmap: { api_keys: [], api_key_labels: {}, models: [], cells: [] },
     })

@@ -30,7 +30,7 @@ import (
 
 const usageEventInsertColumns = entities.UsageEventStorageColumns
 
-const DatasetGeneratorVersion = "production-v10-pricing-storage"
+const DatasetGeneratorVersion = "production-v11-credential-metadata"
 
 type GenerateOptions struct {
 	Path              string
@@ -295,8 +295,8 @@ func seedDatasetMetadata(db *gorm.DB, options GenerateOptions) ([]identityProfil
 	identityRows := make([]entities.UsageIdentity, 0, options.Cardinality.Identities)
 	identityProfiles := make([]identityProfile, 0, options.Cardinality.Identities)
 	for index := 1; index <= options.Cardinality.Identities; index++ {
-		authType := entities.UsageIdentityAuthTypeAuthFile
-		authTypeName := "auth_file"
+		authType := entities.UsageIdentityAuthTypeCredential
+		authTypeName := "oauth"
 		provider := "codex"
 		eventAuthType := "oauth"
 		if index%4 == 0 {
@@ -557,7 +557,7 @@ func eventInsertArgs(event generatedEvent) []any {
 	return []any{
 		event.ID, event.EventKey, event.APIGroupKey, event.Provider, event.Endpoint, event.AuthType, event.RequestID,
 		nil, nil, "", "", nil, nil, nil,
-		nil, nil, nil, event.Model, event.ModelAlias, "", event.ReasoningEffort, event.ServiceTier, event.ResponseServiceTier,
+		nil, nil, nil, event.Model, event.ModelAlias, "", event.ReasoningEffort, event.ServiceTier, "", event.ResponseServiceTier,
 		event.ExecutorType, timestamp, event.Source, event.AuthIndex, event.Failed, event.StatusCode, true, event.Stream, event.LatencyMS, event.TTFTMS,
 		event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.CacheReadTokens,
 		event.CacheCreationTokens, event.TotalTokens, event.CostUSD, event.CostAvailable, timestamp,

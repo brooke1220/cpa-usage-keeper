@@ -56,7 +56,7 @@ type OptionalProviders struct {
 	ErrorEvents        service.ErrorEventProvider
 	Quota              QuotaProvider
 	CPAAPIKeys         service.CPAAPIKeyProvider
-	AuthFiles          service.AuthFilesManagementProvider
+	Credentials        service.CredentialsManagementProvider
 	CredentialStatus   service.CredentialStatusProvider
 	CredentialPriority service.CredentialPriorityProvider
 	RequestLogs        service.RequestLogProvider
@@ -111,7 +111,7 @@ func NewRouter(
 	var errorEventProvider service.ErrorEventProvider
 	var quotaProvider QuotaProvider
 	var cpaAPIKeyProvider service.CPAAPIKeyProvider
-	var authFilesProvider service.AuthFilesManagementProvider
+	var credentialsProvider service.CredentialsManagementProvider
 	var credentialStatusProvider service.CredentialStatusProvider
 	var credentialPriorityProvider service.CredentialPriorityProvider
 	var requestLogProvider service.RequestLogProvider
@@ -125,7 +125,7 @@ func NewRouter(
 		errorEventProvider = optionalProviders[0].ErrorEvents
 		quotaProvider = optionalProviders[0].Quota
 		cpaAPIKeyProvider = optionalProviders[0].CPAAPIKeys
-		authFilesProvider = optionalProviders[0].AuthFiles
+		credentialsProvider = optionalProviders[0].Credentials
 		credentialStatusProvider = optionalProviders[0].CredentialStatus
 		credentialPriorityProvider = optionalProviders[0].CredentialPriority
 		requestLogProvider = optionalProviders[0].RequestLogs
@@ -159,7 +159,7 @@ func NewRouter(
 	registerUsageEventsRoute(adminProtected, usageProvider, usageIdentityProvider, cpaAPIKeyProvider, requestLogProvider, requestLogDownloadTokens, statusConfig.CPARequestLogAccessEnabled)
 	registerUsageIdentityRoutes(adminProtected, usageIdentityProvider)
 	registerErrorEventRoutes(adminProtected, errorEventProvider)
-	registerAuthFileManagementRoutes(adminProtected, authFilesProvider)
+	registerCredentialManagementRoutes(adminProtected, credentialsProvider)
 	registerCredentialStatusRoutes(adminProtected, credentialStatusProvider)
 	registerCredentialPriorityRoutes(adminProtected, credentialPriorityProvider)
 	registerAuthSessionManagementRoutes(adminProtected, authHandler)

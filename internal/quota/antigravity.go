@@ -21,7 +21,7 @@ func NewAntigravityProvider(caller ManagementAPICaller, quotaConfigs []APICallCo
 }
 
 func (p antigravityProvider) Check(ctx context.Context, input ProviderInput) (ProviderOutput, error) {
-	// Antigravity quota 依赖 project_id；缺少时阻断请求并提示用户补齐认证文件元数据。
+	// Antigravity quota 依赖 project_id；缺少时阻断请求并提示用户补齐凭证元数据。
 	if input.Identity.ProjectID == nil || *input.Identity.ProjectID == "" {
 		return ProviderOutput{}, fmt.Errorf("%w: missing project_id parameter", ErrProviderInput)
 	}

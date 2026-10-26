@@ -100,6 +100,8 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20261012_usage_api_key_time_stats",
 		"20261012_cpa_api_key_alias_source",
 		"20261021_restore_local_ranking",
+		"20261020_add_auth_session_oidc_identity",
+		"20261023_usage_event_effective_service_tier",
 	}
 	assertStringSlicesEqual(t, want, got)
 }

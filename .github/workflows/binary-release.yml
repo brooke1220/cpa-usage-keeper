@@ -17,7 +17,7 @@ jobs:
 
   binary-release-linux:
     needs: release-policy
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +37,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
           check-latest: true
           cache: true
 
@@ -45,6 +45,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+          check-latest: true
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -105,7 +106,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
           check-latest: true
           cache: true
 
@@ -113,6 +114,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+          check-latest: true
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -172,7 +174,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
           check-latest: true
           cache: true
 
@@ -180,6 +182,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+          check-latest: true
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -234,7 +237,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs:
       - release-policy
       - binary-release-linux
@@ -242,7 +245,7 @@ jobs:
       - binary-release-windows
     steps:
       - name: Download binary package artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           pattern: cpa-usage-keeper-${{ github.ref_name }}-*
           path: dist
@@ -276,11 +279,11 @@ jobs:
             ${{ steps.version_file.outputs.path }}
 
   update-homebrew-tap:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [release-policy, publish-release]
     steps:
       - name: Download binary package artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           pattern: cpa-usage-keeper-${{ github.ref_name }}-*
           path: dist

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/cpa/dto/authfiles"
+	"cpa-usage-keeper/internal/cpa/dto/credentials"
 	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
 	"cpa-usage-keeper/internal/cpa/dto/response"
 	"cpa-usage-keeper/internal/entities"
@@ -149,7 +149,7 @@ func TestProviderMetadataSyncFailedSourcesPreserveRowsAndEmptySourcesRemoveThem(
 	secondNow := firstNow.Add(time.Hour)
 	// seed 同时包含相同 auth-index 的 xAI OAuth 与 xAI API Key，关联只能依赖 auth_type + identity。
 	seed := []entities.UsageIdentity{
-		{Name: "xAI OAuth", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "shared-xai-auth", Type: "xai", Provider: "xAI", CreatedAt: oldTime, UpdatedAt: oldTime},
+		{Name: "xAI OAuth", AuthType: entities.UsageIdentityAuthTypeCredential, AuthTypeName: "oauth", Identity: "shared-xai-auth", Type: "xai", Provider: "xAI", CreatedAt: oldTime, UpdatedAt: oldTime},
 		{Name: "xAI API Key", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "shared-xai-auth", Type: "xai", Provider: "xAI", LookupKey: "old-xai-secret", CreatedAt: oldTime, UpdatedAt: oldTime},
 		{Name: "Interactions", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "old-interactions", Type: "gemini-interactions", Provider: "Gemini Interactions", LookupKey: "old-interactions-secret", CreatedAt: oldTime, UpdatedAt: oldTime},
 		{Name: "Meta", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "old-meta", Type: "meta", Provider: "Meta", LookupKey: "old-meta-secret", CreatedAt: oldTime, UpdatedAt: oldTime},
@@ -159,7 +159,7 @@ func TestProviderMetadataSyncFailedSourcesPreserveRowsAndEmptySourcesRemoveThem(
 		t.Fatalf("seed new provider identities: %v", err)
 	}
 	fetcher := newMetadataTestFetcher()
-	fetcher.setAuthFiles([]authfiles.AuthFile{{AuthIndex: "shared-xai-auth", Type: "xai", Provider: "xAI", Name: "xai.json"}})
+	fetcher.setCredentials([]credentials.Credential{{AuthIndex: "shared-xai-auth", Type: "xai", Provider: "xAI", Name: "xai.json"}})
 	fetcher.standardResults["xai"] = &response.ProviderKeyConfigResult{StatusCode: 404}
 	fetcher.standardErrors["xai"] = errors.New("xai endpoint missing")
 	fetcher.standardResults["gemini-interactions"] = &response.ProviderKeyConfigResult{StatusCode: 404}
@@ -220,8 +220,8 @@ func TestProviderMetadataSyncFailedSourcesPreserveRowsAndEmptySourcesRemoveThem(
 	if !openAIProvider.IsDeleted || openAIProvider.DeletedAt == nil || !openAIProvider.DeletedAt.Equal(secondNow) || !openAIProvider.UpdatedAt.Equal(secondNow) || openAIProvider.LookupKey != "old-openai-secret" {
 		t.Fatalf("OpenAI provider after all entries skipped = %+v", openAIProvider)
 	}
-	xAIOAuth := secondRows[metadataIdentityKey(entities.UsageIdentityAuthTypeAuthFile, "shared-xai-auth")]
-	// provider stale 不能跨 auth_type 删除 OAuth 行；相同 Auth File metadata 不刷新时间。
+	xAIOAuth := secondRows[metadataIdentityKey(entities.UsageIdentityAuthTypeCredential, "shared-xai-auth")]
+	// provider stale 不能跨 auth_type 删除 OAuth 行；相同 Credential metadata 不刷新时间。
 	if xAIOAuth.IsDeleted || xAIOAuth.DeletedAt != nil || !xAIOAuth.UpdatedAt.Equal(firstNow) {
 		t.Fatalf("xAI OAuth after provider stale = %+v", xAIOAuth)
 	}
