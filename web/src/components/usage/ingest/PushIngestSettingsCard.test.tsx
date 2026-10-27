@@ -12,6 +12,7 @@ import {
   type PushSettingsResponse,
 } from '@/lib/api';
 import { buildPushUploadURL, PushIngestSettingsCard } from './PushIngestSettingsCard';
+import { copyTextToClipboard } from '@/utils/clipboard';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }) }));
 vi.mock('@/utils/clipboard', () => ({ copyTextToClipboard: vi.fn().mockResolvedValue(undefined) }));
@@ -35,6 +36,7 @@ let root: Root;
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
+  vi.mocked(copyTextToClipboard).mockReset().mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -43,6 +45,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   document.body.innerHTML = '';
+  vi.useRealTimers();
 });
 
 const button = (label: string) => {
@@ -71,7 +74,7 @@ it('toggles receiving and lists sources without token material', async () => {
   expect(onNotice).toHaveBeenCalledWith('success', 'push_ingest.saved_enabled');
 });
 
-it('shows a new token once and forgets it after closing', async () => {
+it('hides a new token after closing and allows copying it again from the source row', async () => {
   vi.mocked(fetchPushSettings).mockResolvedValue(settings({ sources: [] }));
   vi.mocked(createPushSource).mockResolvedValue({ ...source, id: 8, name: 'Shanghai CPA', token, token_hint: 'cafe' });
   await act(async () => root.render(<PushIngestSettingsCard />));
@@ -87,6 +90,114 @@ it('shows a new token once and forgets it after closing', async () => {
   await act(async () => button('push_ingest.done').click());
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
   expect(document.body.textContent).not.toContain(token);
+  await act(async () => button('push_ingest.copy_token').click());
+  expect(copyTextToClipboard).toHaveBeenCalledWith(token);
+  expect(container.querySelector('li')?.textContent).toContain('push_ingest.copied');
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('push_ingest.token_copied');
+});
+
+it('copies the full upload URL and resets successful copy feedback', async () => {
+  vi.mocked(fetchPushSettings).mockResolvedValue(settings());
+  await act(async () => root.render(<PushIngestSettingsCard />));
+  vi.useFakeTimers();
+  await act(async () => button('push_ingest.copy_url').click());
+  expect(copyTextToClipboard).toHaveBeenCalledWith(buildPushUploadURL(settings().upload_path));
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('push_ingest.url_copied');
+  await act(async () => { vi.advanceTimersByTime(2000); });
+  expect(button('push_ingest.copy_url')).toBeDefined();
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('');
+});
+
+it('disables copying historical tokens rather than copying their suffix or rotating them', async () => {
+  vi.mocked(fetchPushSettings).mockResolvedValue(settings());
+  await act(async () => root.render(<PushIngestSettingsCard />));
+  const copyButton = button('push_ingest.copy_token');
+  expect(copyButton.disabled).toBe(true);
+  expect(copyButton.title).toBe('push_ingest.token_unavailable');
+  expect(container.textContent).toContain('push_ingest.token_unavailable');
+  await act(async () => copyButton.click());
+  expect(copyTextToClipboard).not.toHaveBeenCalled();
+  expect(rotatePushSource).not.toHaveBeenCalled();
+});
+
+it('reports a copy failure and allows retrying the issued token', async () => {
+  vi.mocked(fetchPushSettings).mockResolvedValue(settings());
+  vi.mocked(rotatePushSource).mockResolvedValue({ ...source, token, token_hint: 'cafe' });
+  vi.mocked(copyTextToClipboard).mockRejectedValueOnce(new Error('clipboard denied'));
+  const onNotice = vi.fn();
+  await act(async () => root.render(<PushIngestSettingsCard onNotice={onNotice} />));
+  await act(async () => button('push_ingest.rotate').click());
+  await act(async () => button('push_ingest.confirm').click());
+  const dialogCopy = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find(node => node.textContent?.trim() === 'push_ingest.copy_token')!;
+  await act(async () => dialogCopy().click());
+  expect(onNotice).toHaveBeenCalledWith('error', 'push_ingest.copy_failed');
+  expect(dialogCopy().disabled).toBe(false);
+  await act(async () => dialogCopy().click());
+  expect(copyTextToClipboard).toHaveBeenLastCalledWith(token);
+  expect(document.querySelector('[data-testid="issued-token"]')?.closest('[role="dialog"]')?.textContent).toContain('push_ingest.copied');
+});
+
+it('replaces cached tokens on rotation and clears them when a source is revoked', async () => {
+  const replacement = 'b'.repeat(60) + 'feed';
+  vi.mocked(fetchPushSettings).mockResolvedValue(settings());
+  vi.mocked(rotatePushSource)
+    .mockResolvedValueOnce({ ...source, token, token_hint: 'cafe' })
+    .mockResolvedValueOnce({ ...source, token: replacement, token_hint: 'feed' });
+  vi.mocked(setPushSourceRevoked)
+    .mockResolvedValueOnce({ ...source, token_hint: 'feed', revoked: true })
+    .mockResolvedValueOnce({ ...source, token_hint: 'feed', revoked: false });
+  await act(async () => root.render(<PushIngestSettingsCard />));
+  for (let index = 0; index < 2; index++) {
+    await act(async () => button('push_ingest.rotate').click());
+    await act(async () => button('push_ingest.confirm').click());
+    await act(async () => button('push_ingest.done').click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  }
+  await act(async () => button('push_ingest.copy_token').click());
+  expect(copyTextToClipboard).toHaveBeenCalledWith(replacement);
+  expect(copyTextToClipboard).not.toHaveBeenCalledWith(token);
+  await act(async () => button('push_ingest.revoke').click());
+  await act(async () => button('push_ingest.confirm').click());
+  expect(button('push_ingest.copy_token').disabled).toBe(true);
+  await act(async () => button('push_ingest.restore').click());
+  expect(container.querySelector('li button')?.getAttribute('disabled')).not.toBeNull();
+});
+
+it('shows the cached full token for manual copying when inline copying fails', async () => {
+  vi.mocked(fetchPushSettings).mockResolvedValue(settings());
+  vi.mocked(rotatePushSource).mockResolvedValue({ ...source, token, token_hint: 'cafe' });
+  const onNotice = vi.fn();
+  await act(async () => root.render(<PushIngestSettingsCard onNotice={onNotice} />));
+  await act(async () => button('push_ingest.rotate').click());
+  await act(async () => button('push_ingest.confirm').click());
+  await act(async () => button('push_ingest.done').click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  vi.mocked(copyTextToClipboard).mockRejectedValueOnce(new Error('clipboard denied'));
+  await act(async () => button('push_ingest.copy_token').click());
+  expect(copyTextToClipboard).toHaveBeenCalledWith(token);
+  expect(onNotice).toHaveBeenCalledWith('error', 'push_ingest.copy_failed');
+  expect(document.querySelector('[data-testid="issued-token"]')?.textContent).toBe(token);
+  expect(rotatePushSource).toHaveBeenCalledTimes(1);
+});
+
+it('clears issued tokens after reloading settings without persisting them in browser storage', async () => {
+  vi.mocked(fetchPushSettings).mockResolvedValue(settings());
+  vi.mocked(rotatePushSource).mockResolvedValue({ ...source, token, token_hint: 'cafe' });
+  const localWrite = vi.spyOn(localStorage, 'setItem');
+  const sessionWrite = vi.spyOn(sessionStorage, 'setItem');
+  await act(async () => root.render(<PushIngestSettingsCard />));
+  await act(async () => button('push_ingest.rotate').click());
+  await act(async () => button('push_ingest.confirm').click());
+  await act(async () => button('push_ingest.done').click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  expect(button('push_ingest.copy_token').disabled).toBe(false);
+  await act(async () => root.render(<PushIngestSettingsCard refreshToken={1} />));
+  expect(button('push_ingest.copy_token').disabled).toBe(true);
+  expect(localWrite).not.toHaveBeenCalled();
+  expect(sessionWrite).not.toHaveBeenCalled();
+  localWrite.mockRestore();
+  sessionWrite.mockRestore();
 });
 
 it('rejects an empty name without calling the server', async () => {

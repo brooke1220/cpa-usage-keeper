@@ -1156,7 +1156,7 @@ export interface PushSource {
   created_at: string
 }
 
-// token 明文只出现在创建或更换的响应里，页面关闭弹窗后不再保留。
+// token 明文只出现在创建或更换的响应里；前端仅在当前设置页内存中暂存以便再次复制。
 export interface IssuedPushSource extends PushSource {
   token: string
 }

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
-import { IconCheck, IconCopy } from '@/components/ui/icons';
+import { IconCheck, IconCopy, IconKey } from '@/components/ui/icons';
 import {
   ApiError,
   createPushSource,
@@ -57,7 +57,10 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
   const [editing, setEditing] = useState<{ id: number; name: string } | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [issued, setIssued] = useState<IssuedPushSource | null>(null);
-  const [copied, setCopied] = useState<'url' | 'token' | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  // 本页新签发的 token 仅暂存于内存，供关闭弹窗后再次复制；不写入浏览器存储。
+  const issuedTokens = useRef(new Map<number, string>());
+  const fieldId = useId();
 
   const handleError = useCallback((error: unknown, fallbackKey: string) => {
     if (error instanceof ApiError && error.status === 401) {
@@ -73,7 +76,13 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
     const controller = new AbortController();
     setLoadFailed(false);
     fetchPushSettings(controller.signal)
-      .then((next) => { if (!controller.signal.aborted) setSettings(next); })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        issuedTokens.current.clear();
+        setIssued(null);
+        setCopied(null);
+        setSettings(next);
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         if (error instanceof ApiError && error.status === 401) {
@@ -85,13 +94,29 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
     return () => controller.abort();
   }, [onAuthRequired, refreshToken]);
 
-  // 列表只保存来源信息；token 明文只留在一次性弹窗状态里，关闭后不再驻留内存。
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  // 列表状态只保存来源信息，不包含明文 token。
   const replaceSource = (source: PushSource) => {
     const listed = withoutToken(source);
+    if (listed.revoked) {
+      issuedTokens.current.delete(listed.id);
+      setCopied(null);
+    }
     setSettings((current) => current && {
       ...current,
       sources: current.sources.map((item) => (item.id === listed.id ? listed : item)),
     });
+  };
+
+  const showIssued = (source: IssuedPushSource) => {
+    issuedTokens.current.set(source.id, source.token);
+    setCopied(null);
+    setIssued(source);
   };
 
   const run = async (task: () => Promise<void>, fallbackKey = 'settings_save_error') => {
@@ -123,7 +148,7 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
       const next = await createPushSource(newName.trim());
       setSettings((current) => current && { ...current, sources: [...current.sources, withoutToken(next)] });
       setNewName('');
-      setIssued(next);
+      showIssued(next);
       onSettingsChanged?.();
     });
   };
@@ -148,11 +173,12 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
       if (kind === 'rotate') {
         const next = await rotatePushSource(source.id);
         replaceSource(next);
-        setIssued(next);
+        showIssued(next);
       } else if (kind === 'revoke') {
         replaceSource(await setPushSourceRevoked(source.id, true));
       } else {
         await deletePushSource(source.id);
+        issuedTokens.current.delete(source.id);
         setSettings((current) => current && { ...current, sources: current.sources.filter((item) => item.id !== source.id) });
       }
       setPending(null);
@@ -165,11 +191,14 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
     onSettingsChanged?.();
   });
 
-  const copy = async (value: string, target: 'url' | 'token') => {
+  const copy = async (value: string, target: string, source?: PushSource) => {
     try {
       await copyTextToClipboard(value);
       setCopied(target);
     } catch {
+      setCopied(null);
+      // 行内复制失败时重新展示本页签发的 token，允许按提示手动选择复制。
+      if (source) setIssued({ ...source, token: value });
       onNotice?.('error', text('copy_failed'));
     }
   };
@@ -179,103 +208,142 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
   const closeIssued = () => { setIssued(null); setCopied(null); };
 
   return (
-    <Card className={styles.card} title={text('settings_title')} subtitle={text('settings_subtitle')}>
+    <Card
+      className={styles.card}
+      title={text('settings_title')}
+      subtitle={text('settings_subtitle')}
+      data-push-settings-card
+      extra={settings && (
+        <label className={styles.switch}>
+          <span>{text('enabled_label')}</span>
+          <input type="checkbox" checked={settings.enabled} disabled={busy} onChange={(event) => void toggleEnabled(event.target.checked)} />
+          <span className={styles.track} aria-hidden="true"><span className={styles.thumb} /></span>
+        </label>
+      )}
+    >
       {loadFailed && <p className={styles.error} role="alert">{text('settings_load_error')}</p>}
       {settings && (
         <div className={styles.body}>
-          <label className={styles.switch}>
-            <span>{text('enabled_label')}</span>
-            <input type="checkbox" checked={settings.enabled} disabled={busy} onChange={(event) => void toggleEnabled(event.target.checked)} />
-            <span className={styles.track} aria-hidden="true"><span className={styles.thumb} /></span>
-          </label>
-          {!settings.enabled && <p className={styles.hint}>{text('disabled_hint')}</p>}
+          {!settings.enabled && <p className={styles.disabledHint}>{text('disabled_hint')}</p>}
 
-          <div className={styles.field}>
-            <span className={styles.label}>{text('upload_url')}</span>
-            <div className={styles.copyRow}>
-              <code className={styles.value}>{uploadURL}</code>
-              <Button variant="secondary" size="sm" onClick={() => void copy(uploadURL, 'url')}>
-                {copied === 'url' ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                {text(copied === 'url' ? 'copied' : 'copy')}
-              </Button>
-            </div>
-            <p className={styles.hint}>{text('upload_url_hint')}</p>
+          <div className={styles.setup}>
+            <section className={styles.setupPanel} aria-labelledby={`${fieldId}-url-label`}>
+              <h4 className={styles.sectionTitle} id={`${fieldId}-url-label`}>{text('upload_url')}</h4>
+              <div className={styles.copyRow}>
+                <code className={styles.value}>{uploadURL}</code>
+                <Button className={styles.copyButton} variant="secondary" size="sm" onClick={() => void copy(uploadURL, 'url')}>
+                  {copied === 'url' ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                  {text(copied === 'url' ? 'copied' : 'copy_url')}
+                </Button>
+              </div>
+              <p className={styles.hint}>{text('upload_url_hint')}</p>
+            </section>
+
+            <section className={styles.setupPanel} aria-labelledby={`${fieldId}-create-label`}>
+              <h4 className={styles.sectionTitle} id={`${fieldId}-create-label`}><IconKey size={16} />{text('add_source')}</h4>
+              <form className={styles.createRow} onSubmit={create}>
+                <div className={styles.field}>
+                  <label className={styles.label} htmlFor={`${fieldId}-name`}>{text('new_source_name')}</label>
+                  <input
+                    id={`${fieldId}-name`}
+                    className="input"
+                    value={newName}
+                    maxLength={MAX_NAME_LENGTH}
+                    placeholder={text('new_source_placeholder')}
+                    aria-invalid={Boolean(nameError)}
+                    aria-describedby={nameError ? `${fieldId}-name-error` : undefined}
+                    onChange={(event) => { setNewName(event.target.value); setNameError(''); }}
+                  />
+                </div>
+                <Button className={styles.createButton} type="submit" loading={busy} disabled={busy}>{text('create')}</Button>
+              </form>
+              {nameError && <p id={`${fieldId}-name-error`} className={styles.error} role="alert">{nameError}</p>}
+            </section>
           </div>
 
-          <form className={styles.createRow} onSubmit={create}>
-            <label className={styles.field}>
-              <span className={styles.label}>{text('new_source_name')}</span>
-              <input
-                className="input"
-                value={newName}
-                maxLength={MAX_NAME_LENGTH}
-                placeholder={text('new_source_placeholder')}
-                aria-invalid={Boolean(nameError)}
-                onChange={(event) => { setNewName(event.target.value); setNameError(''); }}
-              />
-            </label>
-            <Button type="submit" loading={busy} disabled={busy}>{text('create')}</Button>
-          </form>
-          {nameError && <p className={styles.error} role="alert">{nameError}</p>}
+          <section className={styles.sourceSection} aria-labelledby={`${fieldId}-sources-label`}>
+            <div className={styles.sectionHeading}>
+              <h4 className={styles.sectionTitle} id={`${fieldId}-sources-label`}>{text('sources_title')}<span className={styles.count}>{settings.sources.length}</span></h4>
+              <p className={styles.hint}>{text('token_copy_hint')}</p>
+            </div>
 
-          {settings.sources.length === 0
-            ? <p className={styles.hint}>{text('sources_empty')}</p>
-            : (
-              <ul className={styles.sources}>
-                {settings.sources.map((source) => (
-                  <li key={source.id} className={styles.source} data-revoked={source.revoked || undefined}>
-                    <div className={styles.sourceMain}>
-                      {editing?.id === source.id
-                        ? (
-                          <input
-                            className="input"
-                            value={editing.name}
-                            maxLength={MAX_NAME_LENGTH}
-                            aria-label={text('new_source_name')}
-                            onChange={(event) => setEditing({ id: source.id, name: event.target.value })}
-                          />
-                        )
-                        : <strong className={styles.sourceName}>{source.name}</strong>}
-                      <span className={styles.meta}>
-                        {text('token_hint', { hint: source.token_hint })}
-                        {' · '}
-                        {text('last_used')}: {formatTime(source.last_used_at)}
-                        {source.revoked && <span className={styles.badge}>{text('revoked')}</span>}
-                      </span>
-                    </div>
-                    <div className={styles.actions}>
-                      {editing?.id === source.id
-                        ? (
-                          <>
-                            <Button size="sm" disabled={busy} onClick={saveName}>{text('save')}</Button>
-                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>{text('cancel')}</Button>
-                          </>
-                        )
-                        : (
-                          <>
-                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing({ id: source.id, name: source.name })}>{text('rename')}</Button>
-                            {source.revoked
-                              ? (
-                                <>
-                                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void restore(source)}>{text('restore')}</Button>
-                                  <Button size="sm" variant="danger" disabled={busy} onClick={() => setPending({ kind: 'delete', source })}>{text('delete')}</Button>
-                                </>
-                              )
-                              : (
-                                <>
-                                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => setPending({ kind: 'rotate', source })}>{text('rotate')}</Button>
-                                  <Button size="sm" variant="danger" disabled={busy} onClick={() => setPending({ kind: 'revoke', source })}>{text('revoke')}</Button>
-                                </>
-                              )}
-                          </>
-                        )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+            {settings.sources.length === 0
+              ? <p className={styles.empty}>{text('sources_empty')}</p>
+              : (
+                <ul className={styles.sources}>
+                  {settings.sources.map((source) => (
+                    <li key={source.id} className={styles.source} data-revoked={source.revoked || undefined}>
+                      <div className={styles.sourceMain}>
+                        {editing?.id === source.id
+                          ? (
+                            <input
+                              className="input"
+                              value={editing.name}
+                              maxLength={MAX_NAME_LENGTH}
+                              aria-label={text('new_source_name')}
+                              onChange={(event) => setEditing({ id: source.id, name: event.target.value })}
+                            />
+                          )
+                          : <strong className={styles.sourceName}>{source.name}</strong>}
+                        <span className={styles.meta}>
+                          <code className={styles.tokenHint}>{text('token_hint', { hint: source.token_hint })}</code>
+                          <span>{text('last_used')}: {formatTime(source.last_used_at)}</span>
+                          {source.revoked && <span className={styles.badge}>{text('revoked')}</span>}
+                        </span>
+                      </div>
+                      <div className={styles.actions}>
+                        {editing?.id === source.id
+                          ? (
+                            <>
+                              <Button size="sm" disabled={busy} onClick={saveName}>{text('save')}</Button>
+                              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>{text('cancel')}</Button>
+                            </>
+                          )
+                          : (
+                            <>
+                              <Button
+                                className={styles.copyButton}
+                                size="sm"
+                                variant="secondary"
+                                disabled={busy || source.revoked || !issuedTokens.current.has(source.id)}
+                                title={source.revoked ? text('revoked') : issuedTokens.current.has(source.id) ? undefined : text('token_unavailable')}
+                                aria-describedby={!issuedTokens.current.has(source.id) && !source.revoked ? `${fieldId}-token-unavailable` : undefined}
+                                onClick={() => {
+                                  const token = issuedTokens.current.get(source.id);
+                                  if (token) void copy(token, `source-${source.id}`, source);
+                                }}
+                              >
+                                {copied === `source-${source.id}` ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                                {text(copied === `source-${source.id}` ? 'copied' : 'copy_token')}
+                              </Button>
+                              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing({ id: source.id, name: source.name })}>{text('rename')}</Button>
+                              {source.revoked
+                                ? (
+                                  <>
+                                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => void restore(source)}>{text('restore')}</Button>
+                                    <Button className={styles.dangerAction} size="sm" variant="ghost" disabled={busy} onClick={() => setPending({ kind: 'delete', source })}>{text('delete')}</Button>
+                                  </>
+                                )
+                                : (
+                                  <>
+                                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => setPending({ kind: 'rotate', source })}>{text('rotate')}</Button>
+                                    <Button className={styles.dangerAction} size="sm" variant="ghost" disabled={busy} onClick={() => setPending({ kind: 'revoke', source })}>{text('revoke')}</Button>
+                                  </>
+                                )}
+                            </>
+                          )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            {settings.sources.some((source) => !source.revoked && !issuedTokens.current.has(source.id)) && (
+              <p id={`${fieldId}-token-unavailable`} className={styles.hint}>{text('token_unavailable')}</p>
             )}
+          </section>
         </div>
       )}
+      <span className={styles.srOnly} role="status">{copied ? text(copied === 'url' ? 'url_copied' : 'token_copied') : ''}</span>
 
       <Modal
         open={pending !== null}
@@ -303,9 +371,9 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
             <p className={styles.warning}>{text('token_once')}</p>
             <div className={styles.copyRow}>
               <code className={styles.value} data-testid="issued-token">{issued.token}</code>
-              <Button variant="secondary" size="sm" onClick={() => void copy(issued.token, 'token')}>
+              <Button className={styles.copyButton} variant="secondary" size="sm" onClick={() => void copy(issued.token, 'token')}>
                 {copied === 'token' ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                {text(copied === 'token' ? 'copied' : 'copy')}
+                {text(copied === 'token' ? 'copied' : 'copy_token')}
               </Button>
             </div>
             <p className={styles.hint}>{text('token_steps')}</p>

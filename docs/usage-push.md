@@ -10,7 +10,7 @@ Each CPA runs an unmodified official v8 release with the CGO native plugin [keep
 ## Turn on receiving in Keeper
 
 1. Open **Settings → Push receiving** and turn on **Receive pushed usage**. It is off by default.
-2. Enter a name for each CPA (for example `Beijing office CPA`) and choose **Create token**. Keeper shows the token once; copy it immediately. Keeper stores only its SHA-256 hash and the last four characters.
+2. Enter a name for each CPA (for example `Beijing office CPA`) and choose **Create token**. Copy and save the token from the dialog. After closing it, **Copy token** remains available in that CPA's row while you stay on this settings page. The browser keeps newly issued tokens only in page memory, never in local or session storage. Refreshing, leaving the page or reloading settings clears them; revoking or deleting a source clears its cached token too. Keeper stores only the SHA-256 hash and the last four characters. Previously issued tokens cannot be retrieved: choose **New token**, then update the CPA plugin with the replacement.
 3. Copy the upload URL shown on the card. It is built from the address your browser uses; if CPA reaches Keeper through a different address (internal network, reverse proxy), use that address instead and keep any `APP_BASE_PATH`.
 
 Each CPA needs its own token. The token decides which source an upload belongs to, so the plugin does not send a source ID. Renaming a source never changes its internal ID, so deduplication and history are unaffected.
