@@ -18,6 +18,8 @@ import {
   type PushSource,
 } from '@/lib/api';
 import { copyTextToClipboard } from '@/utils/clipboard';
+import type { StatusResponse } from '@/lib/types';
+import { IngestStatusPanel } from './IngestStatusPanel';
 import styles from './PushIngestSettingsCard.module.scss';
 
 type Notice = (kind: 'success' | 'error', message: string) => void;
@@ -26,6 +28,7 @@ type PendingAction = { kind: 'rotate' | 'revoke' | 'delete'; source: PushSource 
 const MAX_NAME_LENGTH = 64;
 
 interface Props {
+  ingestStatus?: StatusResponse['ingest'];
   refreshToken?: number;
   onAuthRequired?: () => void;
   onNotice?: Notice;
@@ -46,7 +49,7 @@ const validName = (name: string) => {
   return trimmed.length > 0 && [...trimmed].length <= MAX_NAME_LENGTH;
 };
 
-export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNotice, onSettingsChanged }: Props) {
+export function PushIngestSettingsCard({ ingestStatus, refreshToken = 0, onAuthRequired, onNotice, onSettingsChanged }: Props) {
   const { t, i18n } = useTranslation();
   const text = useCallback((key: string, options?: Record<string, unknown>) => t(`push_ingest.${key}`, options), [t]);
   const [settings, setSettings] = useState<PushSettingsResponse | null>(null);
@@ -221,6 +224,7 @@ export function PushIngestSettingsCard({ refreshToken = 0, onAuthRequired, onNot
         </label>
       )}
     >
+      {ingestStatus && <IngestStatusPanel status={ingestStatus} onAuthRequired={onAuthRequired} />}
       {loadFailed && <p className={styles.error} role="alert">{text('settings_load_error')}</p>}
       {settings && (
         <div className={styles.body}>

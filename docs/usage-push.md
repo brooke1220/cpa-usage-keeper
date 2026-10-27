@@ -54,7 +54,7 @@ Identical full client API Keys merge across CPA sources. Different keys remain s
 
 Keeper calculates and stores fees using its central pricing rules; absent prices remain unavailable. Execution counting is unchanged: multiple model executions under one inbound request remain separate events. Plugins do not calculate fees.
 
-Administrators see overview, real-time usage, analysis, request events, API Key time usage, pricing, aliases and the existing local ranking for pushed usage. API Keys that arrive only through push are listed for administrators but cannot be used for API Key self-login: Keeper cannot learn when another CPA revokes a key. A push-only Keeper also disables remote credential, quota and request-log operations. The status panel appears whenever receiving is on or a source exists, and shows pending processing, retained processing failures, the last receipt time and each source's last upload.
+Administrators see overview, real-time usage, analysis, request events, API Key time usage, pricing, aliases and the existing local ranking for pushed usage. API Keys that arrive only through push are listed for administrators but cannot be used for API Key self-login: Keeper cannot learn when another CPA revokes a key. A push-only Keeper also disables remote credential, quota and request-log operations. In **Settings → Push receiving**, the status panel appears above the upload URL and CPA setup whenever receiving is on or a source exists (always on push-only instances), and shows pending processing, retained processing failures, the last receipt time and each source's last upload.
 
 ## Recovery and durability
 

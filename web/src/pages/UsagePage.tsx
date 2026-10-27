@@ -1,4 +1,3 @@
-import { IngestStatusPanel } from '@/components/usage/ingest/IngestStatusPanel';
 import { PushIngestSettingsCard } from '@/components/usage/ingest/PushIngestSettingsCard';
 import { ChartLifecycleProvider, useChartRefresh, type ChartRefreshSignal } from '@/components/usage/charts/chartLifecycle';
 import { CredentialEditModal } from '@/components/usage/credentials/CredentialEditModal';
@@ -2200,7 +2199,6 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
 
         <main className={styles.contentColumn}>
           <div className={styles.container}>
-            {showIngestPanel && status?.ingest && <IngestStatusPanel status={status.ingest} onAuthRequired={onAuthRequired} />}
             {loading && !usage && activeTab === 'overview' && (
               <div className={styles.loadingOverlay} aria-busy="true">
                 <div className={styles.loadingOverlayContent}>
@@ -2530,7 +2528,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
             {activeTab === 'settings' && (
               <div className={styles.settingsSections}>
                 <WorkHoursSettingsCard refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} />
-                <PushIngestSettingsCard refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} onSettingsChanged={refreshStatus} />
+                <PushIngestSettingsCard ingestStatus={showIngestPanel ? status?.ingest : undefined} refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} onSettingsChanged={refreshStatus} />
                 <SessionSettingsCard
                   sessions={authSessions}
                   loading={authSessionsLoading}
