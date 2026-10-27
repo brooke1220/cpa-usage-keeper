@@ -954,3 +954,7 @@ describe('persisted API key filter', () => {
     expect(resolveApiKeyFilterRequestState('42', [], false, true)).toEqual({ ready: true, apiKeyId: '42' });
   });
 });
+
+it('does not offer a CPA management link in push mode', () => {
+  expect(getBackToCPALinkURL({ ingest_mode: 'push', cpa_public_url: 'https://cpa.example.com' }, 'https://keeper.example.com')).toBe('');
+});

@@ -53,7 +53,9 @@ type UsageEvent struct {
 	AccountingVersion json.RawMessage `gorm:"-" json:"-"`
 	TokenBreakdown    json.RawMessage `gorm:"-" json:"-"`
 	// 费用回填前保持 NULL；正常入库必须同时明确金额与可用性。
-	CostUSD       *float64  `gorm:"column:cost_usd;type:real"`
-	CostAvailable *bool     `gorm:"column:cost_available;type:boolean"`
-	CreatedAt     time.Time `gorm:"serializer:storageTime"`
+	CostUSD         *float64  `gorm:"column:cost_usd;type:real"`
+	CostAvailable   *bool     `gorm:"column:cost_available;type:boolean"`
+	CreatedAt       time.Time `gorm:"serializer:storageTime"`
+	SourceID        string    `gorm:"not null;default:''"`
+	DeliveryEventID string    `gorm:"not null;default:''"`
 }

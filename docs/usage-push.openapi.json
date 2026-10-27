@@ -1,0 +1,466 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Keeper Usage Push API",
+    "version": "1.0.0",
+    "description": "Maximum request size 1048576 bytes. IDs and payloads remain immutable across retries. Include deployment base path in the server URL."
+  },
+  "paths": {
+    "/api/v1/ingest/usage": {
+      "post": {
+        "operationId": "ingestUsage",
+        "security": [
+          {
+            "pushToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Batch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "All IDs durably committed or already received with identical content. Aggregation may still be pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "schema_version",
+                    "accepted_event_ids"
+                  ],
+                  "properties": {
+                    "schema_version": {
+                      "type": "integer",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "accepted_event_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid batch or protocol version. No batch rows committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid upload token. Retain records and fix credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token belongs to another source. Retain and fix configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ID reused with different immutable content. Whole batch rolled back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1048576 bytes. Split and retain oversized records.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Usage invalid or contains unapproved fields. Isolate and retain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Receiver unavailable, including migration. Retain and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "pushToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Independent random upload token bound to one source. No read or management permissions."
+      }
+    },
+    "schemas": {
+      "Batch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "source_id",
+          "events"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+          },
+          "events": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "delivery_event_id",
+                "usage"
+              ],
+              "properties": {
+                "delivery_event_id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+                },
+                "usage": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "timestamp",
+          "model",
+          "executor_type",
+          "execution_id",
+          "accounting_version",
+          "token_breakdown"
+        ],
+        "properties": {
+          "api_key": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "response_model": {
+            "type": "string"
+          },
+          "executor_type": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "auth_type": {
+            "type": "string"
+          },
+          "auth_index": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "parent_session_id": {
+            "type": "string"
+          },
+          "node_kind": {
+            "type": "string"
+          },
+          "is_fork": {
+            "type": "boolean"
+          },
+          "is_compaction": {
+            "type": "boolean"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          },
+          "service_tier": {
+            "type": "string"
+          },
+          "effective_service_tier": {
+            "type": "string"
+          },
+          "response_service_tier": {
+            "type": "string"
+          },
+          "generate": {
+            "type": "boolean"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "failed": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "ttft_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "accounting_version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "token_breakdown": {
+            "$ref": "#/components/schemas/TokenBreakdown"
+          },
+          "fail": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status_code": {
+                "type": "integer"
+              }
+            }
+          },
+          "tokens": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "reasoning_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_read_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_creation_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "total_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_read_tokens_present": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "TokenBreakdown": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "quality"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "inconsistent",
+              "unclassified"
+            ]
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unclassified_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "total_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "uncached_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_read_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "total_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "non_reasoning_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "reasoning_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

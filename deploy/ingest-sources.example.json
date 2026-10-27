@@ -1,0 +1,4 @@
+[
+  { "source_id": "cpa-one", "token_sha256": "REPLACE_WITH_64_HEX_SHA256" },
+  { "source_id": "cpa-two", "token_sha256": "REPLACE_WITH_ANOTHER_64_HEX_SHA256" }
+]

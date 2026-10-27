@@ -1,0 +1,5 @@
+.panel { margin-bottom: 16px; padding: 16px; border: 1px solid var(--border-color, #64748b40); border-radius: 12px; }
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; font-size: 13px; }
+.list { margin-top: 12px; font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border-color, #64748b40); }
+.row code { overflow-wrap: anywhere; }

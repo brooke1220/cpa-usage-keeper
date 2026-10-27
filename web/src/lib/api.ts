@@ -1135,3 +1135,22 @@ export async function applyPricingSync(request: PricingSyncApplyRequest, signal?
   }
   return response.json()
 }
+
+
+export interface IngestQuarantineItem {
+  id: number
+  source_id: string
+  delivery_event_id: string
+  attempts: number
+}
+
+export async function fetchIngestQuarantine(signal?: AbortSignal): Promise<{ items: IngestQuarantineItem[] }> {
+  const response = await apiFetch(apiPath('/ingest/quarantine'), { signal, cache: 'no-store' })
+  if (!response.ok) await parseApiError(response, 'Failed to load quarantined usage')
+  return response.json()
+}
+
+export async function retryIngestQuarantine(id: number): Promise<void> {
+  const response = await apiFetch(apiPath(`/ingest/quarantine/${id}/retry`), { method: 'POST' })
+  if (!response.ok) await parseApiError(response, 'Failed to retry usage processing')
+}

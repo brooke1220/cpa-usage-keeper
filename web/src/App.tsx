@@ -4,7 +4,7 @@ import './index.css';
 import './App.css';
 import './embed/cpamcEmbed.css';
 import { ApiError, appPath, clearEmbedSessionToken, getSession, login, loginWithCPAAPIKey, startOIDCLogin } from './lib/api';
-import type { AuthRole, AuthSessionAPIKeySummary } from './lib/types';
+import type { AuthRole, AuthSessionAPIKeySummary, IngestMode } from './lib/types';
 import { AppFooter } from './components/AppFooter';
 import { isKeyViewerPath, type KeyViewerPath } from './features/key-viewer';
 import { KeyAnalysisPage } from './pages/KeyAnalysisPage';
@@ -61,6 +61,8 @@ function App() {
   const [apiKeyLoginError, setAPIKeyLoginError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [oidcLoginEnabled, setOIDCLoginEnabled] = useState(false);
+  const [apiKeyLoginEnabled, setAPIKeyLoginEnabled] = useState(true);
+  const [ingestMode, setIngestMode] = useState<IngestMode>('pull');
   const clearUsageStats = useUsageStatsStore((state) => state.clearUsageStats);
   const isEmbeddedInCPAMC = isCPAMCEmbed();
 
@@ -74,6 +76,8 @@ function App() {
 
   const applySession = useCallback((session: Awaited<ReturnType<typeof getSession>>) => {
     setOIDCLoginEnabled(Boolean(session.oidc_login_enabled));
+    setAPIKeyLoginEnabled(session.api_key_login_enabled !== false);
+    setIngestMode(session.ingest_mode === 'push' ? 'push' : 'pull');
     if (!session.authenticated) {
       clearSession();
       return;
@@ -200,13 +204,13 @@ function App() {
   if (authState === 'checking') {
     page = <div className="app-checking" aria-busy="true" />;
   } else if (authState === 'unauthenticated') {
-    page = <LoginPage loading={submitting} oidcEnabled={oidcLoginEnabled && !isEmbeddedInCPAMC} onOIDCLogin={handleOIDCLogin} adminError={adminLoginErrorKey ? t(adminLoginErrorKey) : ''} apiKeyError={apiKeyLoginError} onPasswordSubmit={handlePasswordLogin} onAPIKeySubmit={handleAPIKeyLogin} />;
+    page = <LoginPage apiKeyEnabled={apiKeyLoginEnabled} loading={submitting} oidcEnabled={oidcLoginEnabled && !isEmbeddedInCPAMC} onOIDCLogin={handleOIDCLogin} adminError={adminLoginErrorKey ? t(adminLoginErrorKey) : ''} apiKeyError={apiKeyLoginError} onPasswordSubmit={handlePasswordLogin} onAPIKeySubmit={handleAPIKeyLogin} />;
   } else if (authRole === 'api_key_viewer') {
     page = keyViewerPath === '/key-analysis'
       ? <KeyAnalysisPage apiKey={sessionAPIKey} onNavigate={handleKeyViewerNavigate} onAuthRequired={clearSession} />
       : <KeyOverviewPage page={keyViewerPath === '/key-realtime' ? 'realtime' : 'overview'} apiKey={sessionAPIKey} onNavigate={handleKeyViewerNavigate} onAuthRequired={clearSession} />;
   } else {
-    page = <UsagePage onAuthRequired={clearSession} />;
+    page = <UsagePage ingestMode={ingestMode} onAuthRequired={clearSession} />;
   }
 
   return (

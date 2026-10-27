@@ -38,6 +38,9 @@ const (
 )
 
 type AuthConfig struct {
+	DisableAPIKeyLogin bool
+	// IngestMode is reported with the session so pages can gate CPA-only features without /status.
+	IngestMode           string
 	Enabled              bool
 	LoginPassword        string
 	SessionTTL           time.Duration
@@ -63,10 +66,12 @@ type apiKeyLoginRequest struct {
 }
 
 type sessionResponse struct {
-	Authenticated    bool                   `json:"authenticated"`
-	Role             auth.Role              `json:"role,omitempty"`
-	APIKey           *sessionAPIKeyResponse `json:"api_key,omitempty"`
-	OIDCLoginEnabled bool                   `json:"oidc_login_enabled"`
+	IngestMode         string                 `json:"ingest_mode"`
+	APIKeyLoginEnabled bool                   `json:"api_key_login_enabled"`
+	Authenticated      bool                   `json:"authenticated"`
+	Role               auth.Role              `json:"role,omitempty"`
+	APIKey             *sessionAPIKeyResponse `json:"api_key,omitempty"`
+	OIDCLoginEnabled   bool                   `json:"oidc_login_enabled"`
 }
 
 type sessionAPIKeyResponse struct {
@@ -257,25 +262,28 @@ func (h *authHandler) resolveValidSession(c *gin.Context) (resolvedSessionToken,
 func (h *authHandler) getSession(c *gin.Context) {
 	setNoStoreHeaders(c)
 	oidcEnabled := h != nil && h.config.Enabled && h.config.OIDC != nil && !isOIDCEmbedRequest(c)
+	capabilities := h.sessionCapabilities(oidcEnabled)
 	if h == nil || !h.config.Enabled {
-		c.JSON(http.StatusOK, sessionResponse{Authenticated: true, Role: auth.RoleAdmin})
+		capabilities.Authenticated, capabilities.Role = true, auth.RoleAdmin
+		c.JSON(http.StatusOK, capabilities)
 		return
 	}
 	if h.sessions == nil {
-		c.JSON(http.StatusOK, sessionResponse{Authenticated: false, OIDCLoginEnabled: oidcEnabled})
+		c.JSON(http.StatusOK, capabilities)
 		return
 	}
 
 	resolved, session, ok := h.resolveValidSession(c)
 	if !ok {
-		c.JSON(http.StatusOK, sessionResponse{Authenticated: false, OIDCLoginEnabled: oidcEnabled})
+		c.JSON(http.StatusOK, capabilities)
 		return
 	}
-	response := sessionResponse{Authenticated: true, Role: session.Role, OIDCLoginEnabled: oidcEnabled}
+	response := capabilities
+	response.Authenticated, response.Role = true, session.Role
 	if session.Role == auth.RoleAPIKeyViewer {
 		row, ok := h.activeViewerAPIKey(c, resolved, session)
 		if !ok {
-			c.JSON(http.StatusOK, sessionResponse{Authenticated: false, OIDCLoginEnabled: oidcEnabled})
+			c.JSON(http.StatusOK, capabilities)
 			return
 		}
 		response.APIKey = &sessionAPIKeyResponse{
@@ -285,6 +293,19 @@ func (h *authHandler) getSession(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// sessionCapabilities 返回与登录状态无关的服务端能力，未登录和已登录响应共用同一组字段。
+func (h *authHandler) sessionCapabilities(oidcEnabled bool) sessionResponse {
+	response := sessionResponse{IngestMode: "pull", OIDCLoginEnabled: oidcEnabled}
+	if h == nil {
+		return response
+	}
+	if h.config.IngestMode != "" {
+		response.IngestMode = h.config.IngestMode
+	}
+	response.APIKeyLoginEnabled = !h.config.DisableAPIKeyLogin
+	return response
 }
 
 func (h *authHandler) login(c *gin.Context) {
@@ -330,6 +351,10 @@ func (h *authHandler) login(c *gin.Context) {
 }
 
 func (h *authHandler) apiKeyLogin(c *gin.Context) {
+	if h != nil && h.config.DisableAPIKeyLogin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "API Key login is disabled in push mode"})
+		return
+	}
 	if h == nil || !h.config.Enabled {
 		c.Status(http.StatusNoContent)
 		return
@@ -368,7 +393,7 @@ func (h *authHandler) apiKeyLogin(c *gin.Context) {
 }
 
 func (h *authHandler) activeViewerAPIKey(c *gin.Context, resolved resolvedSessionToken, session auth.Session) (entities.CPAAPIKey, bool) {
-	if h.cpaAPIKeyProvider == nil || session.CPAAPIKeyID <= 0 {
+	if h.config.DisableAPIKeyLogin || h.cpaAPIKeyProvider == nil || session.CPAAPIKeyID <= 0 {
 		h.deleteSession(resolved.Token)
 		clearSessionCookie(c, h.config.BasePath, resolved.CookieKind)
 		return entities.CPAAPIKey{}, false

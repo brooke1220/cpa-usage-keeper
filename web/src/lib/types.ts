@@ -6,7 +6,11 @@ export interface AuthSessionAPIKeySummary {
   alias?: string
 }
 
+export type IngestMode = 'pull' | 'push'
+
 export interface AuthSessionResponse {
+  ingest_mode?: IngestMode
+  api_key_login_enabled?: boolean
   authenticated: boolean
   oidc_login_enabled?: boolean
   role?: AuthRole
@@ -39,6 +43,8 @@ export interface AuthManagedSessionsResponse {
 }
 
 export interface StatusResponse {
+  ingest_mode?: IngestMode
+  ingest?: { last_received_at?: string; pending: number; quarantined: number }
   running: boolean
   sync_running: boolean
   timezone: string

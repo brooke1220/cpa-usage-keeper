@@ -1,3 +1,4 @@
+import { pushIngestMessages } from '@/components/usage/ingest/messages';
 import { apiKeyTimeUsageMessages } from '@/features/api-key-time-usage/messages';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -21,6 +22,7 @@ const getInitialLanguage = (): SupportedLanguage => {
 const resources = {
   en: {
     translation: {
+      push_ingest: pushIngestMessages['en'],
       common: {
         loading: 'Loading...',
         save: 'Save',
@@ -1124,6 +1126,7 @@ const resources = {
   },
   zh: {
     translation: {
+      push_ingest: pushIngestMessages['zh'],
       common: {
         loading: '加载中...',
         save: '保存',
@@ -2227,6 +2230,7 @@ const resources = {
   },
   'zh-TW': {
     translation: {
+      push_ingest: pushIngestMessages['zh-TW'],
       common: {
         loading: '載入中...',
         save: '儲存',

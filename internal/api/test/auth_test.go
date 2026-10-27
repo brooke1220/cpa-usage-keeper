@@ -65,6 +65,20 @@ func TestAuthSessionReportsAuthenticatedWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestAuthSessionReportsIngestModeBeforeLogin(t *testing.T) {
+	sessions := auth.NewSessionManager(time.Hour)
+	pull := NewRouter(nil, nil, nil, nil, AuthConfig{Enabled: true, LoginPassword: "secret"}, NewAuthHandler(AuthConfig{Enabled: true, LoginPassword: "secret"}, sessions), "")
+	if resp := serveAPIGet(pull, "/api/v1/auth/session"); !strings.Contains(resp.Body.String(), `"ingest_mode":"pull"`) || !strings.Contains(resp.Body.String(), `"authenticated":false`) {
+		t.Fatalf("pull session must default to pull mode: %s", resp.Body.String())
+	}
+	pushConfig := AuthConfig{Enabled: true, LoginPassword: "secret", IngestMode: "push", DisableAPIKeyLogin: true}
+	push := NewRouter(nil, nil, nil, nil, pushConfig, NewAuthHandler(pushConfig, sessions), "")
+	resp := serveAPIGet(push, "/api/v1/auth/session")
+	if !strings.Contains(resp.Body.String(), `"ingest_mode":"push"`) || !strings.Contains(resp.Body.String(), `"api_key_login_enabled":false`) {
+		t.Fatalf("push session capabilities missing: %s", resp.Body.String())
+	}
+}
+
 func TestAuthProtectedRouteRequiresSessionWhenEnabled(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
 	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}

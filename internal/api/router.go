@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/auth"
+	"cpa-usage-keeper/internal/ingest"
 	"cpa-usage-keeper/internal/logging"
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/quota"
@@ -46,11 +47,14 @@ type QuotaProvider interface {
 }
 
 type StatusRouteConfig struct {
+	IngestMode                 string
+	Ingest                     *ingest.Receiver
 	CPAPublicURL               string
 	CPARequestLogAccessEnabled bool
 }
 
 type OptionalProviders struct {
+	Ingest             *ingest.Receiver
 	CostReadGate       *service.CostReadGate
 	UsageIdentity      service.UsageIdentityProvider
 	ErrorEvents        service.ErrorEventProvider
@@ -90,6 +94,9 @@ func NewRouter(
 	router := newRouterEngine(authConfig)
 
 	appGroup := router.Group(basePath)
+	if len(optionalProviders) > 0 && optionalProviders[0].Ingest != nil {
+		appGroup.POST("/api/v1/ingest/usage", gin.WrapH(optionalProviders[0].Ingest))
+	}
 	registerHealthRoutes(appGroup, readyStartupStatus)
 
 	apiV1 := appGroup.Group("/api/v1")
@@ -147,6 +154,9 @@ func NewRouter(
 	adminProtected.Use(authHandler.adminMiddleware())
 	adminProtected.Use(costReadMiddleware(costReadGate, basePath))
 	registerStatusRoutes(adminProtected, statusProvider, statusConfig)
+	if len(optionalProviders) > 0 && optionalProviders[0].Ingest != nil {
+		registerIngestAdminRoutes(adminProtected, optionalProviders[0].Ingest)
+	}
 	registerUpdateRoutes(adminProtected, nil)
 	registerUsageOverviewRoute(adminProtected, usageProvider, cpaAPIKeyProvider)
 	registerAPIKeyTimeUsageRoute(adminProtected, apiKeyTimeUsageProvider)
@@ -157,15 +167,19 @@ func NewRouter(
 	registerUsageActivityRoute(adminProtected, usageProvider)
 	registerUsageAnalysisRoute(adminProtected, usageProvider, cpaAPIKeyProvider)
 	registerUsageEventsRoute(adminProtected, usageProvider, usageIdentityProvider, cpaAPIKeyProvider, requestLogProvider, requestLogDownloadTokens, statusConfig.CPARequestLogAccessEnabled)
-	registerUsageIdentityRoutes(adminProtected, usageIdentityProvider)
-	registerErrorEventRoutes(adminProtected, errorEventProvider)
-	registerCredentialManagementRoutes(adminProtected, credentialsProvider)
-	registerCredentialStatusRoutes(adminProtected, credentialStatusProvider)
-	registerCredentialPriorityRoutes(adminProtected, credentialPriorityProvider)
+	if statusConfig.IngestMode != "push" {
+		registerUsageIdentityRoutes(adminProtected, usageIdentityProvider)
+		registerErrorEventRoutes(adminProtected, errorEventProvider)
+		registerCredentialManagementRoutes(adminProtected, credentialsProvider)
+		registerCredentialStatusRoutes(adminProtected, credentialStatusProvider)
+		registerCredentialPriorityRoutes(adminProtected, credentialPriorityProvider)
+	}
 	registerAuthSessionManagementRoutes(adminProtected, authHandler)
 	registerCPAAPIKeyRoutes(adminProtected, cpaAPIKeyProvider)
 	registerPricingRoutes(adminProtected, pricingProvider)
-	registerQuotaRoutes(adminProtected, quotaProvider)
+	if statusConfig.IngestMode != "push" {
+		registerQuotaRoutes(adminProtected, quotaProvider)
+	}
 
 	keyViewerProtected := apiV1.Group("")
 	keyViewerProtected.Use(authHandler.apiKeyViewerMiddleware())
@@ -282,14 +296,16 @@ func stripBasePath(basePath, requestPath string) (string, bool) {
 }
 
 type statusResponse struct {
-	Running                    bool   `json:"running"`
-	SyncRunning                bool   `json:"sync_running"`
-	Timezone                   string `json:"timezone"`
-	CPAPublicURL               string `json:"cpa_public_url,omitempty"`
-	CPARequestLogAccessEnabled bool   `json:"cpa_request_log_access_enabled"`
-	LastError                  string `json:"last_error,omitempty"`
-	LastWarning                string `json:"last_warning,omitempty"`
-	LastStatus                 string `json:"last_status,omitempty"`
+	IngestMode                 string         `json:"ingest_mode"`
+	Ingest                     *ingest.Status `json:"ingest,omitempty"`
+	Running                    bool           `json:"running"`
+	SyncRunning                bool           `json:"sync_running"`
+	Timezone                   string         `json:"timezone"`
+	CPAPublicURL               string         `json:"cpa_public_url,omitempty"`
+	CPARequestLogAccessEnabled bool           `json:"cpa_request_log_access_enabled"`
+	LastError                  string         `json:"last_error,omitempty"`
+	LastWarning                string         `json:"last_warning,omitempty"`
+	LastStatus                 string         `json:"last_status,omitempty"`
 }
 
 type versionResponse struct {
@@ -313,6 +329,21 @@ func buildVersionResponse() versionResponse {
 
 func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, config StatusRouteConfig) {
 	router.GET("/status", func(c *gin.Context) {
+		if config.Ingest != nil {
+			stats, err := config.Ingest.Status(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "ingest status unavailable"})
+				return
+			}
+			state := poller.Status{}
+			if statusProvider != nil {
+				state = statusProvider.Status()
+			}
+			response := buildStatusResponse(state, config)
+			response.Ingest = &stats
+			c.JSON(http.StatusOK, response)
+			return
+		}
 		if statusProvider == nil {
 			c.JSON(http.StatusOK, buildStatusResponse(poller.Status{}, config))
 			return
@@ -323,7 +354,12 @@ func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, con
 }
 
 func buildStatusResponse(status poller.Status, config StatusRouteConfig) statusResponse {
+	mode := config.IngestMode
+	if mode == "" {
+		mode = "pull"
+	}
 	response := statusResponse{
+		IngestMode:                 mode,
 		Running:                    status.Running,
 		SyncRunning:                status.SyncRunning,
 		Timezone:                   time.Local.String(),

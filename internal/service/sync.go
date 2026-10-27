@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"strings"
@@ -300,6 +301,12 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, writeDB *gorm.D
 			}
 			decodeErrs = append(decodeErrs, decodeErr)
 			continue
+		}
+		if row.SourceID != "" {
+			event.SourceID, event.DeliveryEventID = row.SourceID, row.DeliveryEventID
+			if event.AuthIndex != "" {
+				event.AuthIndex = "push." + base64.RawURLEncoding.EncodeToString([]byte(row.SourceID)) + "." + base64.RawURLEncoding.EncodeToString([]byte(event.AuthIndex))
+			}
 		}
 		validRows = append(validRows, row)
 		events = append(events, event)

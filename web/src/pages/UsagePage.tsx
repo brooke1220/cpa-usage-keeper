@@ -1,3 +1,4 @@
+import { IngestStatusPanel } from '@/components/usage/ingest/IngestStatusPanel';
 import { ChartLifecycleProvider, useChartRefresh, type ChartRefreshSignal } from '@/components/usage/charts/chartLifecycle';
 import { CredentialEditModal } from '@/components/usage/credentials/CredentialEditModal';
 import { APIKeyTimeUsagePage } from '@/features/api-key-time-usage/APIKeyTimeUsagePage';
@@ -8,7 +9,7 @@ import type { ModelSpeedRefreshSignal } from '@/components/usage/model-speed/mod
 import { useState, useMemo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentity, fetchVersion, importCpaApiKeyAliases, isCostsBusy, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
-import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyDisplayItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
+import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyDisplayItem, CpaApiKeyOption, CpaApiKeySettingsItem, IngestMode, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { getUsageTabPath, handleUsageTabKeyActivation, normalizeUsageTabValue, resolveInitialUsageTab, shouldHandleUsageNavigation, USAGE_TAB_OPTIONS, type UsageTab } from '@/lib/usageNavigation';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
@@ -211,9 +212,10 @@ const prepareCPAPublicURL = (rawURL: string, currentOrigin: string) => {
 };
 
 export const getBackToCPALinkURL = (
-  status: Pick<StatusResponse, 'cpa_public_url'> | null,
+  status: Pick<StatusResponse, 'cpa_public_url' | 'ingest_mode'> | null,
   currentOrigin = getBrowserOrigin(),
 ) => {
+  if (status?.ingest_mode === 'push') return '';
   const preparedURL = prepareCPAPublicURL(status?.cpa_public_url ?? currentOrigin, currentOrigin);
   if (!preparedURL) return '';
 
@@ -747,8 +749,10 @@ export const triggerBrowserURLDownload = (url: string) => {
   link.remove();
 };
 
-export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
+export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?: IngestMode; onAuthRequired?: () => void }) {
   const { t, i18n } = useTranslation();
+  // 模式来自会话响应；/status 失败时也不能误开或误关 CPA 专属功能。
+  const pushMode = ingestMode === 'push';
   const isMobile = useMediaQuery('(max-width: 768px)');
   const isEmbeddedInCPAMC = isCPAMCEmbed();
   const theme = useThemeStore((state) => state.theme);
@@ -961,13 +965,20 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }, getUpdateCheckToastDuration(kind));
   }, []);
   const credentialsData = useCredentialsTabData({
-    enabledCredentials: credentialSectionVisibility.showCredentials && pageVisible,
-    enabledAiProviders: credentialSectionVisibility.showAiProvider && pageVisible,
+    enabledCredentials: !pushMode && credentialSectionVisibility.showCredentials && pageVisible,
+    enabledAiProviders: !pushMode && credentialSectionVisibility.showAiProvider && pageVisible,
     onAuthRequired,
     onNotice: showTopNotice,
     onPrioritySaved: () => setCredentialPriorityRevision((current) => current + 1),
   });
   const refreshCredentials = credentialsData.refresh;
+  useEffect(() => {
+    if (pushMode && (activeTab === 'credentials' || activeTab === 'ai-provider')) {
+      setActiveTab('overview');
+      // 保留 CPAMC 嵌入标记，否则后续请求不再携带嵌入会话，iframe 会被踢回登录页。
+      window.history.replaceState(null, '', appPath(getUsageTabPath('overview')) + cpamcEmbedSearch());
+    }
+  }, [activeTab, pushMode]);
   const getUsageTabHref = useCallback((tab: UsageTab) => {
     let search = tab === activeTab ? window.location.search : cpamcEmbedSearch();
     if (tab === 'credentials' || tab === 'ai-provider') {
@@ -988,13 +999,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     activateUsageTab(tab);
   }, [activateUsageTab]);
   useEffect(() => {
-    if (activeTab !== 'credentials' && activeTab !== 'ai-provider') return;
+    // 推送模式会改跳概览；同一轮提交里不能再把凭证地址写回去。
+    if (pushMode || (activeTab !== 'credentials' && activeTab !== 'ai-provider')) return;
     // 无参数入口也固定本标签页的筛选，避免刷新时再次读取其他标签页改过的默认偏好。
     const href = getUsageTabHref(activeTab);
     if (href !== window.location.pathname + window.location.search + window.location.hash) {
       window.history.replaceState(null, '', href);
     }
-  }, [activeTab, getUsageTabHref]);
+  }, [activeTab, getUsageTabHref, pushMode]);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
@@ -1007,8 +1019,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const analysisRequestControllerRef = useRef<AbortController | null>(null);
 
   const tabOptions = useMemo(
-    () => getUsageTabOptions(t),
-    [t],
+    () => getUsageTabOptions(t).filter(option => !pushMode || !['credentials', 'ai-provider'].includes(option.value)),
+    [pushMode, t],
   );
   const apiKeySelectOptions = useMemo(
     () => [
@@ -1038,7 +1050,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     if (topNotice.kind === 'success') return styles.updateCheckToastSuccess;
     return styles.updateCheckToastInfo;
   })() : '';
-  const cpaManagementURL = useMemo(() => getBackToCPALinkURL(status), [status]);
+  const cpaManagementURL = useMemo(() => (pushMode ? '' : getBackToCPALinkURL(status)), [pushMode, status]);
 
   const loadApiKeyOptions = useCallback(async () => {
     apiKeyOptionsRequestControllerRef.current?.abort();
@@ -1400,6 +1412,24 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       requestController.abort();
     };
   }, [onAuthRequired]);
+
+  useEffect(() => {
+    if (!pushMode || !pageVisible) return;
+    let controller: AbortController | null = null;
+    const timer = window.setInterval(() => {
+      if (controller) return;
+      const request = new AbortController();
+      controller = request;
+      void fetchStatus(request.signal).then((nextStatus) => {
+        if (request.signal.aborted) return;
+        setStatus(nextStatus);
+        setStatusError(nextStatus.last_error || '');
+      }).catch((error: unknown) => {
+        if (!request.signal.aborted && error instanceof ApiError && (error.status === 401 || error.status === 403)) onAuthRequired?.();
+      }).finally(() => { if (controller === request) controller = null; });
+    }, 5000);
+    return () => { window.clearInterval(timer); controller?.abort(); };
+  }, [onAuthRequired, pageVisible, pushMode]);
 
   useEffect(() => {
     const requestController = new AbortController();
@@ -2158,6 +2188,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
         <main className={styles.contentColumn}>
           <div className={styles.container}>
+            {pushMode && status?.ingest && <IngestStatusPanel status={status.ingest} onAuthRequired={onAuthRequired} />}
             {loading && !usage && activeTab === 'overview' && (
               <div className={styles.loadingOverlay} aria-busy="true">
                 <div className={styles.loadingOverlayContent}>
@@ -2505,7 +2536,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   onNotice={showTopNotice}
                 />
                 <PricingSettings ref={pricingSettingsRef} timezone={status?.timezone} onAuthRequired={onAuthRequired}
-                  onRecalculationSettled={() => { void credentialsData.refreshAfterRecalculation() }} />
+                  onRecalculationSettled={() => { if (!pushMode) void credentialsData.refreshAfterRecalculation() }} />
               </div>
             )}
           </div>

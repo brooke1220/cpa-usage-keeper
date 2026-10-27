@@ -123,6 +123,9 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 
 // buildReadyApp 只在首次迁移数据完成后构造完整业务对象，不负责打开或关闭启动阶段的数据库池。
 func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, lifecycleCtx context.Context, ingestRunner *poller.RedisIngestRunner) (*App, error) {
+	if cfg.PushMode() {
+		return buildPushReadyApp(cfg, db, readDB, logCloser, lifecycleCtx)
+	}
 	// M8 必须先成功加载共享费用缓存；重算结束要在同一对象重载，不能以 nil 伪装业务就绪。
 	recentUsageCache, err := newUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{})
 	if err != nil {
@@ -322,6 +325,8 @@ func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, 
 func appAuthConfig(cfg config.Config) api.AuthConfig {
 	return api.AuthConfig{
 		Enabled:              cfg.AuthEnabled,
+		DisableAPIKeyLogin:   cfg.PushMode(),
+		IngestMode:           cfg.IngestMode,
 		LoginPassword:        cfg.LoginPassword,
 		SessionTTL:           cfg.AuthSessionTTL,
 		BasePath:             cfg.AppBasePath,

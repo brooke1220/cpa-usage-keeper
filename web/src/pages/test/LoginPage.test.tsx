@@ -28,3 +28,9 @@ it('exposes all theme options in a labelled control', () => {
     expect(html).toContain(`usage_stats.theme_${theme}`);
   }
 });
+
+it('hides API Key login when the server disables it', () => {
+  const html = renderToStaticMarkup(<LoginPage apiKeyEnabled={false} onPasswordSubmit={vi.fn()} onAPIKeySubmit={vi.fn()} />);
+  expect(html).not.toContain('auth.api_key_tab');
+  expect(html).toContain('auth.admin_tab');
+});

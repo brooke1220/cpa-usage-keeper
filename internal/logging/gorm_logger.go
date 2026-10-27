@@ -98,3 +98,21 @@ func (l gormLogrusLogger) Trace(ctx context.Context, begin time.Time, query func
 		}).Info("gorm query")
 	}
 }
+
+// WithoutSQLParameters keeps bound keys and raw usage payloads out of SQL diagnostics.
+// The underlying structured logger still reports timings, rows and error categories.
+func WithoutSQLParameters(inner gormlogger.Interface) gormlogger.Interface {
+	return parameterlessGORMLogger{Interface: inner}
+}
+
+type parameterlessGORMLogger struct{ gormlogger.Interface }
+
+func (l parameterlessGORMLogger) ParamsFilter(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
+	return sql, nil
+}
+
+func (l parameterlessGORMLogger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
+	return parameterlessGORMLogger{Interface: l.Interface.LogMode(level)}
+}
+
+var _ gorm.ParamsFilter = parameterlessGORMLogger{}

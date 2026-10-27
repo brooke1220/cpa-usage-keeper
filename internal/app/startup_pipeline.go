@@ -44,10 +44,14 @@ func (a *App) Initialize(ctx context.Context) error {
 	if err := repository.EnsurePricingBootstrapInbox(ctx, db); err != nil {
 		return fmt.Errorf("prepare durable usage inbox: %w", err)
 	}
-	ingest, bridge := newPricingBootstrapIngestRunner(*a.Config, db)
+	var ingest *poller.RedisIngestRunner
+	var bridge *UsageIngestBridge
+	if !a.Config.PushMode() {
+		ingest, bridge = newPricingBootstrapIngestRunner(*a.Config, db)
+	}
 	a.ingestBridge = bridge
 	a.RedisIngest = ingest
-	if a.serveStartup {
+	if a.serveStartup && ingest != nil {
 		a.ingestStarted = true
 		a.startBackgroundTask(func() {
 			if runErr := ingest.Run(a.backgroundContext); runErr != nil {
@@ -90,8 +94,10 @@ func (a *App) Initialize(ctx context.Context) error {
 		return fmt.Errorf("prepare business services: %w", err)
 	}
 	a.installReadyApp(ready)
-	if err := bridge.ActivateNormalWriter(poller.NewRedisInboxWriter(db), a.MetadataSync); err != nil {
-		return fmt.Errorf("activate normal usage ingest: %w", err)
+	if bridge != nil {
+		if err := bridge.ActivateNormalWriter(poller.NewRedisInboxWriter(db), a.MetadataSync); err != nil {
+			return fmt.Errorf("activate normal usage ingest: %w", err)
+		}
 	}
 	return nil
 }
@@ -157,7 +163,7 @@ func (a *App) RunContext(ctx context.Context) error {
 		if err := a.StartupShell.ActivateReady(a.Router); err != nil {
 			logrus.WithError(err).Error("activate business router")
 			_ = a.StartupShell.Publish(api.StartupPhaseFailed, nil)
-		} else {
+		} else if !a.Config.PushMode() {
 			// 就绪后只检查一次，版本提示不参与迁移、收数或本地历史读取的门禁。
 			a.startBackgroundTask(func() {
 				client := cpa.NewClient(a.Config.CPABaseURL, a.Config.CPAManagementKey, a.Config.RequestTimeout, a.Config.TLSSkipVerify)

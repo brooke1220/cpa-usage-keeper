@@ -25,6 +25,7 @@ type LoginErrors = {
 interface LoginPageProps extends LoginErrors {
   loading?: boolean;
   oidcEnabled?: boolean;
+  apiKeyEnabled?: boolean;
   onOIDCLogin?: () => Promise<void>;
   onPasswordSubmit: (password: string) => Promise<void>;
   onAPIKeySubmit: (apiKey: string) => Promise<void>;
@@ -34,7 +35,7 @@ export const getLoginErrorForMode = (mode: LoginMode, { adminError = '', apiKeyE
   mode === 'api_key' ? apiKeyError : adminError
 );
 
-export function LoginPage({ loading = false, oidcEnabled = false, onOIDCLogin, adminError = '', apiKeyError = '', onPasswordSubmit, onAPIKeySubmit }: LoginPageProps) {
+export function LoginPage({ loading = false, apiKeyEnabled = true, oidcEnabled = false, onOIDCLogin, adminError = '', apiKeyError = '', onPasswordSubmit, onAPIKeySubmit }: LoginPageProps) {
   const { t } = useTranslation();
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
@@ -104,7 +105,7 @@ export function LoginPage({ loading = false, oidcEnabled = false, onOIDCLogin, a
             >
               {t('auth.admin_tab')}
             </button>
-            <button
+            {apiKeyEnabled && <button
               type="button"
               role="tab"
               aria-selected={mode === 'api_key'}
@@ -113,7 +114,7 @@ export function LoginPage({ loading = false, oidcEnabled = false, onOIDCLogin, a
               disabled={loading}
             >
               {t('auth.api_key_tab')}
-            </button>
+            </button>}
           </div>
 
           <form className={styles.form} onSubmit={(event) => void handleSubmit(event)}>

@@ -37,6 +37,8 @@ var (
 )
 
 type Config struct {
+	IngestMode    string
+	IngestSources []PushSource
 	// AppHost 是 Web 服务监听主机；空值保持监听所有可用网络接口的现有行为。
 	AppHost string
 	// AppPort 是 Web 服务监听端口。
@@ -284,7 +286,20 @@ func Load(options LoadOptions) (*Config, error) {
 
 	workDir := getString("WORK_DIR", DefaultWorkDir)
 
+	mode := strings.ToLower(getString("INGEST_MODE", "pull"))
+	if mode != "pull" && mode != "push" {
+		return nil, fmt.Errorf("INGEST_MODE must be pull or push")
+	}
+	var sources []PushSource
+	if mode == "push" {
+		sources, err = LoadPushSources(strings.TrimSpace(os.Getenv("INGEST_SOURCES_FILE")))
+		if err != nil {
+			return nil, err
+		}
+	}
 	cfg := &Config{
+		IngestMode:                    mode,
+		IngestSources:                 sources,
 		AppHost:                       strings.TrimSpace(os.Getenv("APP_HOST")),
 		AppPort:                       getString("APP_PORT", "8080"),
 		AppBasePath:                   appBasePath,
@@ -324,10 +339,10 @@ func Load(options LoadOptions) (*Config, error) {
 	if appHost := strings.TrimSpace(options.AppHost); appHost != "" {
 		cfg.AppHost = appHost
 	}
-	if cfg.CPABaseURL == "" {
+	if !cfg.PushMode() && cfg.CPABaseURL == "" {
 		return nil, fmt.Errorf("CPA_BASE_URL is required")
 	}
-	if cfg.CPAManagementKey == "" {
+	if !cfg.PushMode() && cfg.CPAManagementKey == "" {
 		return nil, fmt.Errorf("CPA_MANAGEMENT_KEY is required")
 	}
 	if cfg.AuthEnabled {

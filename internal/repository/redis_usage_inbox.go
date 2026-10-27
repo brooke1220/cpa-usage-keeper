@@ -37,7 +37,7 @@ func HasProcessableRedisUsageInbox(ctx context.Context, db *gorm.DB) (bool, erro
 	return marker == 1, nil
 }
 
-const redisUsageInboxProcessingColumns = "id, source, raw_message, status, attempt_count, usage_event_key, popped_at"
+const redisUsageInboxProcessingColumns = "id, source, source_id, delivery_event_id, raw_message, status, attempt_count, usage_event_key, popped_at"
 
 const (
 	RedisUsageInboxStatusPending       = "pending"
@@ -155,7 +155,8 @@ func MarkRedisUsageInboxDecodeFailed(db *gorm.DB, id int64, decodeErr error) err
 func MarkRedisUsageInboxProcessFailed(db *gorm.DB, id int64, processErr error) error {
 	return db.Model(&entities.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
 		"status": gorm.Expr(
-			"CASE WHEN attempt_count + ? >= ? THEN ? ELSE ? END",
+			"CASE WHEN source_id <> '' AND attempt_count + ? >= ? THEN 'quarantined' WHEN source_id <> '' THEN 'process_failed' WHEN attempt_count + ? >= ? THEN ? ELSE ? END",
+			1, redisUsageInboxMaxProcessAttempts,
 			1,
 			redisUsageInboxMaxProcessAttempts,
 			RedisUsageInboxStatusDiscarded,
@@ -206,7 +207,7 @@ func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (dto.RedisUsageInboxClea
 	}
 	result.ProcessedDeleted = processedDelete.RowsAffected
 
-	failedDelete := db.Where("status IN ? AND updated_at < ?", []string{RedisUsageInboxStatusDecodeFailed, RedisUsageInboxStatusProcessFailed, RedisUsageInboxStatusDiscarded}, failedCutoff).Delete(&entities.RedisUsageInbox{})
+	failedDelete := db.Where("source_id = '' AND status IN ? AND updated_at < ?", []string{RedisUsageInboxStatusDecodeFailed, RedisUsageInboxStatusProcessFailed, RedisUsageInboxStatusDiscarded}, failedCutoff).Delete(&entities.RedisUsageInbox{})
 	if failedDelete.Error != nil {
 		return result, failedDelete.Error
 	}
@@ -217,7 +218,7 @@ func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (dto.RedisUsageInboxClea
 
 func markRedisUsageInboxFailed(db *gorm.DB, id int64, status string, err error) error {
 	return db.Model(&entities.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":        status,
+		"status":        gorm.Expr("CASE WHEN source_id <> '' THEN 'quarantined' ELSE ? END", status),
 		"attempt_count": gorm.Expr("attempt_count + ?", 1),
 		"last_error":    boundedRedisUsageInboxError(err),
 	}).Error

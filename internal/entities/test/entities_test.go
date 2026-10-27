@@ -14,6 +14,7 @@ import (
 func TestAllIncludesCoreModels(t *testing.T) {
 	items := All()
 	expected := []any{
+		&PushReceipt{},
 		&UsageEvent{},
 		&UsageEventArchive{},
 		// Errors 直接写最终表；全新数据库必须随核心模型创建该表。

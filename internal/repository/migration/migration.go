@@ -335,6 +335,7 @@ func orderedMigrations() []databaseMigration {
 		// 新合入的上游迁移追加在本地已发布迁移之后，保留现有执行顺序。
 		{version: "20261020_add_auth_session_oidc_identity", run: addAuthSessionOIDCIdentityMigration},
 		{version: migrationAddUsageEventEffectiveServiceTier, run: addUsageEventEffectiveServiceTierMigration},
+		{version: "20261026_push_ingest", run: pushIngestMigration},
 	}
 }
 

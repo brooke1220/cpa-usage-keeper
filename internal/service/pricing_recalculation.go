@@ -33,14 +33,15 @@ type PricingRecalculationDependencies struct {
 	Aggregation  *poller.UsageAggregationRunner
 	CostReadGate *CostReadGate
 	Recent       *repository.UsageRecentEventCache
-	Quota        *quota.Service
-	Now          func() time.Time
+	// Quota is optional in push mode, which has no remote credential services.
+	Quota *quota.Service
+	Now   func() time.Time
 }
 
 // NewPricingServiceWithRecalculation 在同一价格服务上装配单任务协调，不建立第二套价格写锁或持久任务表。
 // App 调用方必须传入自身生命周期及真实处理、聚合和缓存依赖；缺失时启动装配直接失败。
 func NewPricingServiceWithRecalculation(db *gorm.DB, catalog *pricing.Catalog, opts PricingRecalculationDependencies, modelsFetcher ...ModelsFetcher) PricingProvider {
-	if opts.LifecycleCtx == nil || opts.Sync == nil || opts.Aggregation == nil || opts.CostReadGate == nil || opts.Recent == nil || opts.Quota == nil {
+	if opts.LifecycleCtx == nil || opts.Sync == nil || opts.Aggregation == nil || opts.CostReadGate == nil || opts.Recent == nil {
 		panic("pricing recalculation dependencies are required")
 	}
 	if opts.Now == nil {
