@@ -1,14 +1,12 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
 	"cpa-usage-keeper/internal/service"
 	"cpa-usage-keeper/internal/service/dto"
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 )
 
 func registerAPIKeyTimeUsageRoute(router gin.IRoutes, provider service.APIKeyTimeUsageProvider) {
@@ -40,14 +38,4 @@ func registerAPIKeyTimeUsageRoute(router gin.IRoutes, provider service.APIKeyTim
 			c.JSON(http.StatusOK, report)
 		}
 	})
-}
-
-// logUnexpectedRequestError records server-side failures. A request the client
-// already abandoned is not an error worth alerting on.
-func logUnexpectedRequestError(c *gin.Context, message string, err error) {
-	if errors.Is(err, context.Canceled) || errors.Is(c.Request.Context().Err(), context.Canceled) {
-		logrus.WithError(err).Debug(message)
-		return
-	}
-	logrus.WithError(err).Error(message)
 }

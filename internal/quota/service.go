@@ -61,6 +61,10 @@ type Service struct {
 	// autoRefreshNow 和 autoRefreshDelay 仅用于调度器测试固定时间和跳过真实等待。
 	autoRefreshNow   func() time.Time
 	autoRefreshDelay func(context.Context, time.Duration) bool
+	// autoRefreshTimerMu 保护定时器能力探测；当前环境不支持时只尝试和提示一次。
+	autoRefreshTimerMu          sync.Mutex
+	autoRefreshTimerUnavailable bool
+	autoRefreshNewTimer         func(time.Duration) (<-chan time.Time, func(), error)
 	// lastAutoRefreshAttemptAt 记录最近一次尝试启动整轮自动刷新的时间，用于扫描失败退避。
 	lastAutoRefreshAttemptAt time.Time
 	// lastAutoRefreshRoundAt 记录上次启动整轮 Credentials 自动刷新入队的内存时间。

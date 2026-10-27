@@ -134,6 +134,10 @@ func setAutoRefreshDelay(service *quota.Service, delay func(context.Context, tim
 	quotaServiceField(service, "autoRefreshDelay").Set(reflect.ValueOf(delay))
 }
 
+func setAutoRefreshTimerFactory(service *quota.Service, factory func(time.Duration) (<-chan time.Time, func(), error)) {
+	quotaServiceField(service, "autoRefreshNewTimer").Set(reflect.ValueOf(factory))
+}
+
 func autoRefreshSettingsChanged(service *quota.Service) chan struct{} {
 	return quotaServiceField(service, "autoRefreshSettingsChanged").Interface().(chan struct{})
 }

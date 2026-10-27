@@ -2,47 +2,56 @@ package test
 
 import (
 	. "cpa-usage-keeper/internal/config"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestLoadPushModeNeedsNoCPAConnection(t *testing.T) {
+func TestLoadWithoutCPARunsPushOnlyReceiver(t *testing.T) {
 	withIsolatedEnvFiles(t)
-	hash := sha256.Sum256([]byte(strings.Repeat("s", 32)))
-	path := filepath.Join(t.TempDir(), "sources.json")
-	raw, _ := json.Marshal([]PushSource{{SourceID: "cpa-one", TokenSHA256: hex.EncodeToString(hash[:])}})
-	if err := os.WriteFile(path, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("INGEST_MODE", "push")
-	t.Setenv("INGEST_SOURCES_FILE", path)
 	cfg, err := LoadFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.PushMode() || cfg.CPABaseURL != "" || cfg.CPAManagementKey != "" || len(cfg.IngestSources) != 1 {
-		t.Fatalf("push config incorrect: %+v", cfg)
-	}
-	t.Setenv("INGEST_SOURCES_FILE", "")
-	if _, err := LoadFromEnv(); err == nil {
-		t.Fatal("push mode accepted no authenticated sources")
+	if cfg.CPAConfigured() || cfg.IngestMode() != "push" {
+		t.Fatalf("missing CPA connection must start a push-only receiver: %+v", cfg)
 	}
 }
 
-func TestPushSourcesRejectAmbiguousCredentials(t *testing.T) {
-	hash := strings.Repeat("ab", 32)
-	for _, sources := range [][]PushSource{
-		nil, {{SourceID: "bad source", TokenSHA256: hash}}, {{SourceID: "one", TokenSHA256: "invalid"}},
-		{{SourceID: "one", TokenSHA256: hash}, {SourceID: "two", TokenSHA256: hash}},
-		{{SourceID: "one", TokenSHA256: hash}, {SourceID: "one", TokenSHA256: strings.Repeat("cd", 32)}},
-	} {
-		if err := ValidatePushSources(sources); err == nil {
-			t.Fatal("ambiguous source configuration accepted")
-		}
+// 旧推送配置不能被静默忽略：否则中心会改为拉取，并拒收所有已部署 CPA 的上传。
+func TestLoadRejectsRemovedPushSettings(t *testing.T) {
+	for key, value := range map[string]string{"INGEST_MODE": "push", "INGEST_SOURCES_FILE": "/etc/keeper/ingest-sources.json"} {
+		t.Run(key, func(t *testing.T) {
+			withIsolatedEnvFiles(t)
+			t.Setenv(key, value)
+			_, err := LoadFromEnv()
+			if err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "Settings > Push receiving") {
+				t.Fatalf("removed setting %s must fail with migration guidance, got %v", key, err)
+			}
+		})
+	}
+}
+
+// INGEST_MODE=pull 曾是示例文件里未注释的默认行；照旧复制配置的拉取部署升级后必须能启动。
+func TestLoadAcceptsLegacyPullModeLine(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	t.Setenv("INGEST_MODE", "pull")
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:8317")
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	cfg, err := LoadFromEnv()
+	if err != nil || !cfg.CPAConfigured() {
+		t.Fatalf("legacy INGEST_MODE=pull must keep pull deployments working: %+v %v", cfg, err)
+	}
+}
+
+func TestLoadWithCPAKeepsPullMode(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:8317")
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.CPAConfigured() || cfg.IngestMode() != "pull" {
+		t.Fatalf("configured CPA must keep pull mode: %+v", cfg)
 	}
 }

@@ -72,9 +72,11 @@ func (l gormLogrusLogger) Trace(ctx context.Context, begin time.Time, query func
 
 	elapsed := time.Since(begin)
 	recordNotFound := errors.Is(queryErr, gorm.ErrRecordNotFound)
+	// 调用方主动取消（浏览器中止请求、服务关闭）不是数据库故障，只在 debug 级别保留排查线索。
+	canceled := errors.Is(queryErr, context.Canceled)
 	// 只有确定需要输出时才展开 SQL，保持 GORM 正常查询路径的原有开销边界。
 	switch {
-	case queryErr != nil && !recordNotFound && l.level >= gormlogger.Error && logrus.IsLevelEnabled(logrus.ErrorLevel):
+	case queryErr != nil && !recordNotFound && !canceled && l.level >= gormlogger.Error && logrus.IsLevelEnabled(logrus.ErrorLevel):
 		sql, rows := query()
 		logrus.WithContext(ctx).WithError(queryErr).WithFields(logrus.Fields{
 			"elapsed": elapsed.Round(time.Microsecond).String(),
@@ -89,6 +91,13 @@ func (l gormLogrusLogger) Trace(ctx context.Context, begin time.Time, query func
 			"sql":       sql,
 			"threshold": l.slowThreshold.String(),
 		}).Warn("gorm slow query")
+	case canceled && l.level >= gormlogger.Error && logrus.IsLevelEnabled(logrus.DebugLevel):
+		sql, rows := query()
+		logrus.WithContext(ctx).WithError(queryErr).WithFields(logrus.Fields{
+			"elapsed": elapsed.Round(time.Microsecond).String(),
+			"rows":    rows,
+			"sql":     sql,
+		}).Debug("gorm query canceled")
 	case queryErr == nil && l.level >= gormlogger.Info && logrus.IsLevelEnabled(logrus.InfoLevel):
 		sql, rows := query()
 		logrus.WithContext(ctx).WithFields(logrus.Fields{

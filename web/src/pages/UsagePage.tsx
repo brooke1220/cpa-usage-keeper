@@ -1,4 +1,5 @@
 import { IngestStatusPanel } from '@/components/usage/ingest/IngestStatusPanel';
+import { PushIngestSettingsCard } from '@/components/usage/ingest/PushIngestSettingsCard';
 import { ChartLifecycleProvider, useChartRefresh, type ChartRefreshSignal } from '@/components/usage/charts/chartLifecycle';
 import { CredentialEditModal } from '@/components/usage/credentials/CredentialEditModal';
 import { APIKeyTimeUsagePage } from '@/features/api-key-time-usage/APIKeyTimeUsagePage';
@@ -1394,6 +1395,9 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
     };
   }, []);
 
+  // 推送设置变化后递增，立即重新读取状态；否则拉取实例要整页刷新才能看到接收状态面板。
+  const [statusRevision, setStatusRevision] = useState(0);
+  const refreshStatus = useCallback(() => setStatusRevision((current) => current + 1), []);
   useEffect(() => {
     const requestController = new AbortController();
     void fetchStatus(requestController.signal)
@@ -1411,10 +1415,18 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
     return () => {
       requestController.abort();
     };
-  }, [onAuthRequired]);
+  }, [onAuthRequired, statusRevision]);
 
+  // 自动导入 CPA 名称只需要知道状态已加载；依赖整个 status 会让推送状态每 5 秒轮询一次就重跑并中断导入。
+  const statusLoaded = status !== null;
+  // 拉取和推送并存时，只要开启了接收或登记过来源就显示接收状态；纯推送实例始终显示。
+  // 拉取实例某次读不到推送统计时 /status 不带 ingest，保留上一次的判断，否则面板消失、轮询也随之停止。
+  const ingestInUse = Boolean(status?.ingest?.enabled || status?.ingest?.sources?.length);
+  const [ingestPanelSeen, setIngestPanelSeen] = useState(false);
+  if (status?.ingest && ingestInUse !== ingestPanelSeen) setIngestPanelSeen(ingestInUse);
+  const showIngestPanel = pushMode || (status?.ingest ? ingestInUse : ingestPanelSeen);
   useEffect(() => {
-    if (!pushMode || !pageVisible) return;
+    if (!showIngestPanel || !pageVisible) return;
     let controller: AbortController | null = null;
     const timer = window.setInterval(() => {
       if (controller) return;
@@ -1429,7 +1441,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
       }).finally(() => { if (controller === request) controller = null; });
     }, 5000);
     return () => { window.clearInterval(timer); controller?.abort(); };
-  }, [onAuthRequired, pageVisible, pushMode]);
+  }, [onAuthRequired, pageVisible, showIngestPanel]);
 
   useEffect(() => {
     const requestController = new AbortController();
@@ -2011,7 +2023,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
   }, [activeTab, loadApiKeySettings, loadAuthSessions]);
 
   useEffect(() => {
-    if (activeTab !== 'settings' || !status || apiKeySettingsLoading || apiKeySettingsSavingId || !apiKeySettings.length || !cpaManagementURL) return;
+    if (activeTab !== 'settings' || !statusLoaded || apiKeySettingsLoading || apiKeySettingsSavingId || !apiKeySettings.length || !cpaManagementURL) return;
     const controller = new AbortController();
     let importing = false;
     const importBrowserNames = async () => {
@@ -2060,7 +2072,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [activeTab, apiKeySettings, apiKeySettingsLoading, apiKeySettingsSavingId, cpaManagementURL, importCPAKeyNamesToKeeper, onAuthRequired, showTopNotice, status, t]);
+  }, [activeTab, apiKeySettings, apiKeySettingsLoading, apiKeySettingsSavingId, cpaManagementURL, importCPAKeyNamesToKeeper, onAuthRequired, showTopNotice, statusLoaded, t]);
 
   useEffect(() => {
     const next = sanitizeRequestEventFilters(
@@ -2188,7 +2200,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
 
         <main className={styles.contentColumn}>
           <div className={styles.container}>
-            {pushMode && status?.ingest && <IngestStatusPanel status={status.ingest} onAuthRequired={onAuthRequired} />}
+            {showIngestPanel && status?.ingest && <IngestStatusPanel status={status.ingest} onAuthRequired={onAuthRequired} />}
             {loading && !usage && activeTab === 'overview' && (
               <div className={styles.loadingOverlay} aria-busy="true">
                 <div className={styles.loadingOverlayContent}>
@@ -2518,6 +2530,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
             {activeTab === 'settings' && (
               <div className={styles.settingsSections}>
                 <WorkHoursSettingsCard refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} />
+                <PushIngestSettingsCard refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} onSettingsChanged={refreshStatus} />
                 <SessionSettingsCard
                   sessions={authSessions}
                   loading={authSessionsLoading}

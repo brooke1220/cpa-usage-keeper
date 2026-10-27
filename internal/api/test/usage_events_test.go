@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -22,9 +23,12 @@ import (
 
 	. "cpa-usage-keeper/internal/api"
 	"cpa-usage-keeper/internal/auth"
+	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/logging"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -1280,6 +1284,40 @@ func TestUsageEventModelFilterOptionsReturnsStableModels(t *testing.T) {
 	body := resp.Body.String()
 	if body != `{"models":["claude-sonnet","gpt-5"]}` {
 		t.Fatalf("expected stable model filter options, got %s", body)
+	}
+}
+
+func TestUsageEventModelFilterOptionsDemotesCanceledRequestLog(t *testing.T) {
+	closer, err := logging.Configure(config.Config{LogLevel: "debug"})
+	if err != nil {
+		t.Fatalf("configure logging: %v", err)
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+	var output bytes.Buffer
+	logrus.SetOutput(&output)
+
+	provider := &usageEventsStub{err: fmt.Errorf("load usage event model filter options: %w", context.Canceled)}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/filters/models", nil).WithContext(ctx)
+	router.ServeHTTP(httptest.NewRecorder(), request)
+
+	provider.err = errors.New("database is locked")
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/filters/models", nil))
+
+	if err := closer.Close(); err != nil {
+		t.Fatalf("close logging: %v", err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(output.String(), "")
+	if !strings.Contains(plain, `| debug | list usage event model filter options failed | error="load usage event model filter options: context canceled"`) {
+		t.Fatalf("expected canceled request to be logged at debug level, got %q", plain)
+	}
+	if strings.Contains(plain, `| error | list usage event model filter options failed | error="load usage event model filter options: context canceled"`) {
+		t.Fatalf("expected canceled request not to be logged as error, got %q", plain)
+	}
+	if !strings.Contains(plain, `| error | list usage event model filter options failed | error="database is locked"`) {
+		t.Fatalf("expected real failure to stay at error level, got %q", plain)
 	}
 }
 

@@ -44,7 +44,13 @@ export interface AuthManagedSessionsResponse {
 
 export interface StatusResponse {
   ingest_mode?: IngestMode
-  ingest?: { last_received_at?: string; pending: number; quarantined: number }
+  ingest?: {
+    enabled?: boolean
+    last_received_at?: string
+    pending: number
+    quarantined: number
+    sources?: { name: string; revoked: boolean; last_used_at?: string }[]
+  }
   running: boolean
   sync_running: boolean
   timezone: string

@@ -139,7 +139,15 @@ git diff --check
 
 ## 2026-10-26 集中推送模式兼容
 
-- `INGEST_MODE=push` 的 `buildPushReadyApp` 继续构造本地排行服务和 runner，`installReadyApp` 继续移交 `LocalRanking`。
+- 未配置 CPA 时的 `buildPushReadyApp` 继续构造本地排行服务和 runner，`installReadyApp` 继续移交 `LocalRanking`。
 - 相同完整 API Key 跨来源合并，增量登记保留手工别名及头像，不执行单来源全量删除同步。
 - 来源字段和去重凭据通过新增 `20261026_push_ingest` 迁移追加，旧排行迁移和顺序保持不变。
-- 推送模式隐藏远端凭证操作，保留 `/ranking`、既有榜单指标及聚合；新增 `internal/app/test/push_startup_test.go` 验证启动交接。
+- 只接收推送时隐藏远端凭证操作，保留 `/ranking`、既有榜单指标及聚合；`internal/app/test/push_startup_test.go` 验证启动交接。
+
+## 2026-10-27 推送来源改为设置页管理
+
+- 推送开关和来源 token 存数据库（`push_sources` 表、`app_settings` 的 `ingest.push_enabled`），已移除 `INGEST_MODE`、`INGEST_SOURCES_FILE`。未配置 `CPA_BASE_URL` 时只接收推送；配置了则拉取与推送并存，两种装配都创建推送接收器。
+- 新增 `20261027_push_sources` 迁移追加在 `20261026_push_ingest` 之后：建 `push_sources`，并给 `cpa_api_keys` 加 `pull_seen`、`push_seen`。已发布迁移不改。
+- 拉取同步只撤自己的 `pull_seen`，推送登记的 Key 不会被删除，别名和排行头像随行保留；Key 自助登录只认 `pull_seen`。迁移按已入库的推送用量回填 `push_seen`；旧库从未拉取时同时撤销这些 Key 的 `pull_seen`。
+- 仍设置 `INGEST_SOURCES_FILE` 或 `INGEST_MODE=push` 时拒绝启动，提示改用设置页，避免旧中心被静默改成拉取；旧示例里的 `INGEST_MODE=pull` 只告警。
+- 本地排行无需改动：排行按 `api_group_key` 关联 `cpa_api_keys`，推送 Key 仍以 `is_deleted = false` 出现在榜单中。

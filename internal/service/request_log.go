@@ -97,7 +97,8 @@ func (s *requestLogService) GetUsageEventRequestLog(ctx context.Context, eventID
 	if err != nil {
 		return RequestLogResponse{}, err
 	}
-	if requestID == "" {
+	// 推送事件的请求日志在上报它的 CPA 上，拉取的 CPA 查不到，也不能拿同名请求 ID 误查别人的日志。
+	if requestID == "" || s.pushedEvent(ctx, eventID) {
 		return RequestLogResponse{EventID: eventID, Available: false}, ErrRequestLogMissingID
 	}
 
@@ -178,7 +179,7 @@ func (s *requestLogService) DownloadUsageEventRequestLog(ctx context.Context, ev
 	if err != nil {
 		return RequestLogDownload{}, err
 	}
-	if requestID == "" {
+	if requestID == "" || s.pushedEvent(ctx, eventID) {
 		return RequestLogDownload{EventID: eventID, Downloadable: false}, ErrRequestLogMissingID
 	}
 	result, err := s.client.OpenRequestLogByID(ctx, requestID)
@@ -300,4 +301,13 @@ func parseRequestLogSectionTitle(line string) (string, bool) {
 		return "", false
 	}
 	return title, true
+}
+
+// pushedEvent 报告事件是否由推送接收；查询失败按非推送处理，沿用原有的请求日志行为。
+func (s *requestLogService) pushedEvent(ctx context.Context, eventID int64) bool {
+	var sourceID string
+	if err := s.db.WithContext(ctx).Table("usage_events").Select("source_id").Where("id = ?", eventID).Scan(&sourceID).Error; err != nil {
+		return false
+	}
+	return strings.TrimSpace(sourceID) != ""
 }

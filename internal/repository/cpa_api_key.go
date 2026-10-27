@@ -6,8 +6,10 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/timeutil"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/plugin/dbresolver"
 )
 
@@ -30,11 +32,13 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 		ID         int64
 		APIKey     string
 		DisplayKey string
+		PullSeen   bool
+		PushSeen   bool
 		IsDeleted  bool
 	}
 	// 先在独立 reader 上比较完整 key 集合，只有变化才进入 writer 事务。
 	if err := db.Clauses(dbresolver.Read).Model(&entities.CPAAPIKey{}).
-		Select("id, api_key, display_key, is_deleted").Find(&existingRows).Error; err != nil {
+		Select("id, api_key, display_key, pull_seen, push_seen, is_deleted").Find(&existingRows).Error; err != nil {
 		return err
 	}
 	type keyUpdate struct {
@@ -59,6 +63,9 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 			if row.IsDeleted {
 				fields["is_deleted"] = false
 			}
+			if !row.PullSeen {
+				fields["pull_seen"] = true
+			}
 			if len(fields) > 0 {
 				fields["last_synced_at"] = &syncedAt
 				fields["updated_at"] = syncedAt
@@ -69,20 +76,28 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 		toCreate = append(toCreate, entities.CPAAPIKey{
 			APIKey:       key,
 			DisplayKey:   helper.RedactSensitiveValue(key),
+			PullSeen:     true,
 			IsDeleted:    false,
 			LastSyncedAt: &syncedAt,
 		})
 	}
-	staleIDs := make([]int64, 0)
+	// 拉取清单只对自己负责：从 CPA 消失的 Key 先撤掉拉取标记；推送带来的其他 CPA 的 Key 仍保留可见，
+	// 否则每轮同步都会把它们删掉、下一条推送又恢复，造成筛选和别名反复失效。
+	staleIDs, unpulledIDs := make([]int64, 0), make([]int64, 0)
 	for _, row := range existingRows {
-		if row.IsDeleted {
+		if !row.PullSeen {
 			continue
 		}
-		if _, ok := incoming[row.APIKey]; !ok {
+		if _, ok := incoming[row.APIKey]; ok {
+			continue
+		}
+		if row.PushSeen {
+			unpulledIDs = append(unpulledIDs, row.ID)
+		} else {
 			staleIDs = append(staleIDs, row.ID)
 		}
 	}
-	if len(toCreate) == 0 && len(toUpdate) == 0 && len(staleIDs) == 0 {
+	if len(toCreate) == 0 && len(toUpdate) == 0 && len(staleIDs) == 0 && len(unpulledIDs) == 0 {
 		return nil
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -92,15 +107,44 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 			}
 		}
 		if len(toCreate) > 0 {
-			if err := tx.Create(&toCreate).Error; err != nil {
+			// 快照之后推送可能刚登记了同一个 Key；冲突时只补拉取标记，不能让整轮同步因唯一键失败回滚。
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "api_key"}},
+				DoUpdates: clause.Assignments(map[string]any{"pull_seen": true, "is_deleted": false, "last_synced_at": &syncedAt, "updated_at": syncedAt}),
+			}).Create(&toCreate).Error; err != nil {
+				return err
+			}
+		}
+		if len(unpulledIDs) > 0 {
+			if err := tx.Model(&entities.CPAAPIKey{}).Where("id IN ?", unpulledIDs).Updates(map[string]any{"pull_seen": false, "updated_at": syncedAt}).Error; err != nil {
 				return err
 			}
 		}
 		if len(staleIDs) == 0 {
 			return nil
 		}
-		return tx.Model(&entities.CPAAPIKey{}).Where("id IN ?", staleIDs).Updates(map[string]any{"is_deleted": true, "updated_at": syncedAt}).Error
+		// 候选来自 reader 快照；写入前再确认 push_seen，期间刚被推送登记的 Key 只撤拉取标记，不删除。
+		if err := tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND push_seen = ?", staleIDs, true).Updates(map[string]any{"pull_seen": false, "updated_at": syncedAt}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND push_seen = ?", staleIDs, false).Updates(map[string]any{"pull_seen": false, "is_deleted": true, "updated_at": syncedAt}).Error
 	})
+}
+
+// RecordPushedCPAAPIKey 在推送入库的同一事务里登记 Key。只设置推送标记并恢复可见，
+// 不改别名、不授予拉取标记：只经推送出现的 Key 不能用于 Key 自助登录。
+func RecordPushedCPAAPIKey(tx *gorm.DB, key string, seenAt time.Time) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	at := timeutil.FormatStorageTime(seenAt)
+	// 用显式 SQL：GORM 会把带 default:true 的 bool 零值替换成默认值，结构体写入无法保存 pull_seen=false。
+	// 时间按 storageTime 序列化格式写入，与结构体读写保持一致。
+	return tx.Exec(`INSERT INTO cpa_api_keys (api_key, display_key, key_alias, key_alias_source, pull_seen, push_seen, is_deleted, last_synced_at, created_at, updated_at)
+VALUES (?, ?, '', '', 0, 1, 0, ?, ?, ?)
+ON CONFLICT(api_key) DO UPDATE SET push_seen = 1, is_deleted = 0, last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at`,
+		key, helper.RedactSensitiveValue(key), at, at, at).Error
 }
 
 func ListActiveCPAAPIKeys(db *gorm.DB) ([]entities.CPAAPIKey, error) {
@@ -118,6 +162,21 @@ func FindActiveCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) 
 func FindActiveCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey, error) {
 	var row entities.CPAAPIKey
 	err := db.Where("api_key = ? AND is_deleted = ?", apiKey, false).First(&row).Error
+	return row, err
+}
+
+// 以下两个查询只服务 Key 自助登录：只认拉取的 CPA 当前仍列出的 Key。其他 CPA 撤销 Key 时 Keeper 无从得知，
+// 若放行推送登记的 Key，被撤销的 Key 仍能一直登录查看用量。
+
+func FindLoginCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) {
+	var row entities.CPAAPIKey
+	err := db.Where("id = ? AND is_deleted = ? AND pull_seen = ?", id, false, true).First(&row).Error
+	return row, err
+}
+
+func FindLoginCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey, error) {
+	var row entities.CPAAPIKey
+	err := db.Where("api_key = ? AND is_deleted = ? AND pull_seen = ?", apiKey, false, true).First(&row).Error
 	return row, err
 }
 

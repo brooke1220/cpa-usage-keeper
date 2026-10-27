@@ -1,0 +1,202 @@
+.card:global(.card) {
+  height: auto;
+  min-height: auto;
+  overflow: visible;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger-color);
+  font-size: 12px;
+}
+
+.warning {
+  margin: 0;
+  color: var(--warning-color, #b45309);
+  font-weight: 700;
+}
+
+.copyRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.value {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.createRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+
+.sources {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-color);
+
+  &[data-revoked] .sourceName {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+  }
+}
+
+.sourceMain {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sourceName {
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger-color) 14%, transparent);
+  color: var(--danger-color);
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.issued {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+// 与凭证页的“只看启用”开关保持同一外观，不新增通用组件。
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 5px 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+
+  input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  input:checked + .track {
+    border-color: color-mix(in srgb, #38bdf8 68%, var(--border-color));
+    background: linear-gradient(135deg, #2563eb 0%, #38bdf8 58%, #67e8f9 100%);
+  }
+
+  input:checked + .track .thumb {
+    transform: translateX(18px);
+  }
+
+  input:focus-visible + .track {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+  }
+
+  input:disabled + .track {
+    opacity: 0.6;
+  }
+}
+
+.track {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, #dbeafe);
+  border-radius: 999px;
+  background: color-mix(in srgb, #dbeafe 34%, var(--bg-primary));
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.thumb {
+  position: absolute;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #fff, color-mix(in srgb, var(--bg-primary) 86%, #dbeafe));
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.22);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}

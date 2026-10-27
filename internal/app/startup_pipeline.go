@@ -46,7 +46,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	var ingest *poller.RedisIngestRunner
 	var bridge *UsageIngestBridge
-	if !a.Config.PushMode() {
+	if a.Config.CPAConfigured() {
 		ingest, bridge = newPricingBootstrapIngestRunner(*a.Config, db)
 	}
 	a.ingestBridge = bridge
@@ -163,7 +163,7 @@ func (a *App) RunContext(ctx context.Context) error {
 		if err := a.StartupShell.ActivateReady(a.Router); err != nil {
 			logrus.WithError(err).Error("activate business router")
 			_ = a.StartupShell.Publish(api.StartupPhaseFailed, nil)
-		} else if !a.Config.PushMode() {
+		} else if a.Config.CPAConfigured() {
 			// 就绪后只检查一次，版本提示不参与迁移、收数或本地历史读取的门禁。
 			a.startBackgroundTask(func() {
 				client := cpa.NewClient(a.Config.CPABaseURL, a.Config.CPAManagementKey, a.Config.RequestTimeout, a.Config.TLSSkipVerify)

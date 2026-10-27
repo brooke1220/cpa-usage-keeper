@@ -163,7 +163,8 @@ func TestOpenDatabaseConfiguresSQLiteRuntime(t *testing.T) {
 		t.Fatalf("expected WAL journal mode, got %q", journalMode)
 	}
 
-	for pragma, want := range map[string]int{"busy_timeout": 15000, "synchronous": 1, "foreign_keys": 1} {
+	// synchronous=FULL(2)：推送接收可在运行中打开，已 ACK 的数据必须真正落盘，不再区分启动模式。
+	for pragma, want := range map[string]int{"busy_timeout": 15000, "synchronous": 2, "foreign_keys": 1} {
 		var got int
 		if err := db.Raw("PRAGMA " + pragma).Scan(&got).Error; err != nil {
 			t.Fatalf("read %s: %v", pragma, err)

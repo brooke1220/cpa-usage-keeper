@@ -106,6 +106,25 @@ func TestRequestLogServiceLoadsEventLogWithoutCachingByRequestID(t *testing.T) {
 	}
 }
 
+// 推送事件的请求日志在上报它的 CPA 上；拉取的 CPA 不能被拿同名请求 ID 去查。
+func TestRequestLogServiceSkipsPushedEvents(t *testing.T) {
+	db := requestLogTestDatabase(t, "req-pushed")
+	if err := db.Exec("UPDATE usage_events SET source_id = ? WHERE id = 1", "src_remote").Error; err != nil {
+		t.Fatal(err)
+	}
+	client := &requestLogClientStub{result: &cpa.RequestLogResult{StatusCode: http.StatusOK, Body: []byte("pulled CPA log")}}
+	provider := service.NewRequestLogService(db, client)
+	if _, err := provider.GetUsageEventRequestLog(context.Background(), 1); !errors.Is(err, service.ErrRequestLogMissingID) {
+		t.Fatalf("pushed event preview must be unavailable, got %v", err)
+	}
+	if _, err := provider.DownloadUsageEventRequestLog(context.Background(), 1); !errors.Is(err, service.ErrRequestLogMissingID) {
+		t.Fatalf("pushed event download must be unavailable, got %v", err)
+	}
+	if client.fetchCalls() != 0 || client.downloadCalls != 0 {
+		t.Fatal("pushed event queried the pulled CPA")
+	}
+}
+
 func TestRequestLogServiceMapsCPANotFoundToUnavailable(t *testing.T) {
 	db := requestLogTestDatabase(t, "req-missing")
 

@@ -312,13 +312,7 @@ func (s *Service) sleepAutoRefreshDelay(ctx context.Context, delay time.Duration
 		return autoRefreshWakeElapsed
 	}
 
-	timerCh, stopTimer, err := newSuspendAwareTimer(delay)
-	if err != nil {
-		logrus.WithError(err).Warn("failed to create suspend-aware timer, falling back to standard timer")
-		timer := time.NewTimer(delay)
-		timerCh = timer.C
-		stopTimer = func() { timer.Stop() }
-	}
+	timerCh, stopTimer := s.newAutoRefreshTimer(delay)
 	defer stopTimer()
 
 	select {

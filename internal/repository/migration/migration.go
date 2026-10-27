@@ -336,6 +336,7 @@ func orderedMigrations() []databaseMigration {
 		{version: "20261020_add_auth_session_oidc_identity", run: addAuthSessionOIDCIdentityMigration},
 		{version: migrationAddUsageEventEffectiveServiceTier, run: addUsageEventEffectiveServiceTierMigration},
 		{version: "20261026_push_ingest", run: pushIngestMigration},
+		{version: migrationPushSources, run: pushSourcesMigration},
 	}
 }
 

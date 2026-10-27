@@ -123,8 +123,13 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 
 // buildReadyApp 只在首次迁移数据完成后构造完整业务对象，不负责打开或关闭启动阶段的数据库池。
 func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, lifecycleCtx context.Context, ingestRunner *poller.RedisIngestRunner) (*App, error) {
-	if cfg.PushMode() {
+	if !cfg.CPAConfigured() {
 		return buildPushReadyApp(cfg, db, readDB, logCloser, lifecycleCtx)
+	}
+	// 连接了 CPA 时照常拉取，同时按设置页开关接收其他 CPA 的推送；接收器只读写本地库，不依赖 CPA。
+	pushReceiver, err := newPushReceiver(lifecycleCtx, db)
+	if err != nil {
+		return nil, err
 	}
 	// M8 必须先成功加载共享费用缓存；重算结束要在同一对象重载，不能以 nil 伪装业务就绪。
 	recentUsageCache, err := newUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{})
@@ -310,7 +315,10 @@ func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, 
 				APIKeyTimeUsage:    apiKeyTimeUsageService,
 				LocalRanking:       localRankingService,
 				WorkHours:          workhours.NewService(db, workClock),
+				Ingest:             pushReceiver,
 				Status: api.StatusRouteConfig{
+					IngestMode:                 cfg.IngestMode(),
+					Ingest:                     pushReceiver,
 					CPAPublicURL:               cfg.CPAPublicURL,
 					CPARequestLogAccessEnabled: cfg.CPARequestLogAccessEnabled,
 				},
@@ -325,8 +333,8 @@ func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, 
 func appAuthConfig(cfg config.Config) api.AuthConfig {
 	return api.AuthConfig{
 		Enabled:              cfg.AuthEnabled,
-		DisableAPIKeyLogin:   cfg.PushMode(),
-		IngestMode:           cfg.IngestMode,
+		DisableAPIKeyLogin:   !cfg.CPAConfigured(),
+		IngestMode:           cfg.IngestMode(),
 		LoginPassword:        cfg.LoginPassword,
 		SessionTTL:           cfg.AuthSessionTTL,
 		BasePath:             cfg.AppBasePath,

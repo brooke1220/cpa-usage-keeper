@@ -38,6 +38,7 @@ vi.mock('@/lib/api', async (importOriginal) => ({
   fetchPricingModels: async () => ({ models: [], config_revision: 0 }),
   fetchPricingModelOptions: async () => ({ models: [] }),
   fetchCurrentPricingRecalculation: async () => null,
+  fetchPushSettings: async () => ({ enabled: false, upload_path: '/api/v1/ingest/usage', sources: [] }),
   fetchUsageEventModelFilterOptions: async () => ({ models: [] }),
   fetchUsageEventSourceFilterOptions: async () => ({ sources: [] }),
   fetchUsageEvents: async (): Promise<UsageEventsResponse> => ({

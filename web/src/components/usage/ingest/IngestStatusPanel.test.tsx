@@ -16,6 +16,18 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
+it('shows per-source uploads and explains when receiving is off', async () => {
+  await act(async () => root.render(<IngestStatusPanel status={{ enabled: false, pending: 2, quarantined: 0, sources: [
+    { name: 'Beijing CPA', revoked: false, last_used_at: '2026-10-27T01:00:00Z' },
+    { name: 'Idle CPA', revoked: false },
+    { name: 'Retired CPA', revoked: true },
+  ] }} />));
+  expect(container.textContent).toContain('push_ingest.receiving_off');
+  expect(container.textContent).toContain('Beijing CPA');
+  expect(container.textContent).toContain('push_ingest.source_never');
+  expect(container.textContent).not.toContain('Retired CPA');
+});
+
 it('lets administrators review and retry retained records', async () => {
   vi.mocked(fetchIngestQuarantine).mockResolvedValue({ items: [{ id: 12, source_id: 'cpa-one', delivery_event_id: 'delivery-one', attempts: 5 }] });
   vi.mocked(retryIngestQuarantine).mockResolvedValue(undefined);

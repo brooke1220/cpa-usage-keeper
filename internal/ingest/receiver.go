@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,9 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
@@ -46,45 +44,31 @@ type Ack struct {
 	AcceptedIDs   []string `json:"accepted_event_ids"`
 }
 
-type source struct {
-	id   string
-	hash [32]byte
-}
 type Receiver struct {
 	db      *gorm.DB
-	sources []source
+	sources *Sources
 }
 
-func New(db *gorm.DB, sources []config.PushSource) (*Receiver, error) {
+// New 创建接收器；来源与开关来自设置页维护的 Sources，修改后立即生效，无需重启。
+func New(db *gorm.DB, sources *Sources) (*Receiver, error) {
 	if db == nil {
 		return nil, fmt.Errorf("push database is required")
 	}
-	if err := config.ValidatePushSources(sources); err != nil {
-		return nil, err
+	if sources == nil {
+		return nil, fmt.Errorf("push sources are required")
 	}
-	r := &Receiver{db: db}
-	for _, v := range sources {
-		hash, _ := hex.DecodeString(v.TokenSHA256)
-		s := source{id: v.SourceID}
-		copy(s.hash[:], hash)
-		r.sources = append(r.sources, s)
-	}
-	return r, nil
+	return &Receiver{db: db, sources: sources}, nil
 }
 
-func (r *Receiver) authenticate(header string) string {
+// Sources 暴露来源管理，供设置页接口使用。
+func (r *Receiver) Sources() *Sources { return r.sources }
+
+func (r *Receiver) authenticate(header string) (int64, string, bool) {
 	token, ok := strings.CutPrefix(header, "Bearer ")
 	if !ok || len(token) < 32 || len(token) > 4096 {
-		return ""
+		return 0, "", false
 	}
-	hash := sha256.Sum256([]byte(token))
-	id := ""
-	for _, s := range r.sources {
-		if subtle.ConstantTimeCompare(hash[:], s.hash[:]) == 1 {
-			id = s.id
-		}
-	}
-	return id
+	return r.sources.authenticate(token)
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
@@ -95,8 +79,13 @@ func writeError(w http.ResponseWriter, status int, code string) {
 }
 
 func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	sourceID := r.authenticate(req.Header.Get("Authorization"))
-	if sourceID == "" {
+	// 开关关闭时按暂时不可用回复：插件保留已落盘数据并退避重试，重新打开后自动补传。
+	if !r.sources.Enabled() {
+		writeError(w, 503, "push_ingest_disabled")
+		return
+	}
+	sourceKey, sourceID, ok := r.authenticate(req.Header.Get("Authorization"))
+	if !ok {
 		writeError(w, 401, "invalid_push_credentials")
 		return
 	}
@@ -117,7 +106,8 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 400, "invalid_batch")
 		return
 	}
-	if b.SourceID != sourceID {
+	// 来源由 token 决定；新插件不再发送 source_id。旧插件仍会发送，必须与 token 绑定的来源一致。
+	if b.SourceID != "" && b.SourceID != sourceID {
 		writeError(w, 403, "source_mismatch")
 		return
 	}
@@ -131,7 +121,8 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	ack, err := r.Accept(req.Context(), sourceID, b.Events, time.Now())
+	now := time.Now()
+	ack, err := r.accept(req.Context(), sourceKey, sourceID, b.Events, now)
 	if err != nil {
 		if errors.Is(err, ErrConflict) {
 			writeError(w, 409, "delivery_id_conflict")
@@ -148,7 +139,13 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Accept atomically records receipt, raw inbox data and the non-destructive Key catalog.
 // An ACK covers the durable transaction, not asynchronous aggregation completion.
 func (r *Receiver) Accept(ctx context.Context, sourceID string, events []Event, now time.Time) (Ack, error) {
+	return r.accept(ctx, 0, sourceID, events, now)
+}
+
+// accept 在同一事务里写入凭据、原始收件和 Key 目录；sourceKey 为 0 时不更新来源的最近上传时间。
+func (r *Receiver) accept(ctx context.Context, sourceKey int64, sourceID string, events []Event, now time.Time) (Ack, error) {
 	ack := Ack{SchemaVersion: 1, AcceptedIDs: make([]string, 0, len(events))}
+	recordUse := sourceKey > 0 && r.sources.shouldRecordUse(sourceKey, now)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, e := range events {
 			hash := sha256.Sum256(e.Usage)
@@ -179,17 +176,20 @@ func (r *Receiver) Accept(ctx context.Context, sourceID string, events []Event, 
 			if err := json.Unmarshal(e.Usage, &payload); err != nil {
 				return err
 			}
-			key := strings.TrimSpace(payload.APIKey)
-			if key != "" {
-				record := entities.CPAAPIKey{APIKey: key, DisplayKey: helper.RedactSensitiveValue(key), LastSyncedAt: &now}
-				if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "api_key"}}, DoUpdates: clause.Assignments(map[string]any{"is_deleted": false, "last_synced_at": timeutil.NormalizeStorageTime(now)})}).Create(&record).Error; err != nil {
-					return err
-				}
+			if err := repository.RecordPushedCPAAPIKey(tx, payload.APIKey, now); err != nil {
+				return err
 			}
 			ack.AcceptedIDs = append(ack.AcceptedIDs, e.ID)
 		}
+		// 最近上传时间随同一事务提交：不在 ACK 之后另写，进程重启或请求取消都不会丢失。
+		if recordUse {
+			return tx.Model(&entities.PushSource{}).Where("id = ?", sourceKey).Update("last_used_at", timeutil.NormalizeStorageTime(now)).Error
+		}
 		return nil
 	})
+	if err != nil && recordUse {
+		r.sources.forgetRecordedUse(sourceKey, now)
+	}
 	return ack, err
 }
 
@@ -257,9 +257,18 @@ func validateUsage(raw []byte) error {
 }
 
 type Status struct {
-	LastReceivedAt *time.Time `json:"last_received_at,omitempty"`
-	Pending        int64      `json:"pending"`
-	Quarantined    int64      `json:"quarantined"`
+	Enabled        bool           `json:"enabled"`
+	LastReceivedAt *time.Time     `json:"last_received_at,omitempty"`
+	Pending        int64          `json:"pending"`
+	Quarantined    int64          `json:"quarantined"`
+	Sources        []SourceStatus `json:"sources"`
+}
+
+// SourceStatus 让管理员逐台确认 CPA 是否仍在上报；只有全局时间时，某台 CPA 停报很难被发现。
+type SourceStatus struct {
+	Name       string     `json:"name"`
+	Revoked    bool       `json:"revoked"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
 // Status is polled by every open dashboard. Receipts are retained forever, so it never counts
@@ -267,7 +276,7 @@ type Status struct {
 // ingest writes are serialized, so rowid order is receipt order; received_at text carries a
 // local UTC offset and stops sorting chronologically when that offset changes.
 func (r *Receiver) Status(ctx context.Context) (Status, error) {
-	var s Status
+	s := Status{Enabled: r.sources.Enabled()}
 	var latest entities.PushReceipt
 	if err := r.db.WithContext(ctx).Select("source_id,received_at").Order("rowid DESC").Limit(1).Find(&latest).Error; err != nil {
 		return s, err
@@ -276,28 +285,44 @@ func (r *Receiver) Status(ctx context.Context) (Status, error) {
 		v := latest.ReceivedAt
 		s.LastReceivedAt = &v
 	}
+	sources, err := r.sources.List(ctx)
+	if err != nil {
+		return s, err
+	}
+	s.Sources = make([]SourceStatus, 0, len(sources))
+	for _, source := range sources {
+		s.Sources = append(s.Sources, SourceStatus{Name: source.Name, Revoked: source.Revoked, LastUsedAt: source.LastUsedAt})
+	}
 	if err := r.db.WithContext(ctx).Model(&entities.RedisUsageInbox{}).Where("source_id<>'' AND status IN ?", []string{"pending", "process_failed"}).Count(&s.Pending).Error; err != nil {
 		return s, err
 	}
-	err := r.db.WithContext(ctx).Model(&entities.RedisUsageInbox{}).Where("source_id<>'' AND status IN ?", []string{"quarantined", "decode_failed", "discarded"}).Count(&s.Quarantined).Error
+	err = r.db.WithContext(ctx).Model(&entities.RedisUsageInbox{}).Where("source_id<>'' AND status IN ?", []string{"quarantined", "decode_failed", "discarded"}).Count(&s.Quarantined).Error
 	return s, err
 }
 
 type QuarantineItem struct {
 	ID              int64  `json:"id"`
 	SourceID        string `json:"source_id"`
+	SourceName      string `json:"source_name,omitempty"`
 	DeliveryEventID string `json:"delivery_event_id"`
 	Attempts        int    `json:"attempts"`
 }
 
 func (r *Receiver) Quarantine(ctx context.Context) ([]QuarantineItem, error) {
 	var rows []entities.RedisUsageInbox
-	err := r.db.WithContext(ctx).Select("id,source_id,delivery_event_id,attempt_count").Where("source_id<>'' AND status IN ?", []string{"quarantined", "decode_failed", "discarded"}).Order("id").Limit(100).Find(&rows).Error
+	if err := r.db.WithContext(ctx).Select("id,source_id,delivery_event_id,attempt_count").Where("source_id<>'' AND status IN ?", []string{"quarantined", "decode_failed", "discarded"}).Order("id").Limit(100).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	// 已删除的来源查不到名称，界面退回显示内部 ID。
+	names, err := r.sources.SourceNames(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]QuarantineItem, 0, len(rows))
 	for _, v := range rows {
-		result = append(result, QuarantineItem{v.ID, v.SourceID, v.DeliveryEventID, v.AttemptCount})
+		result = append(result, QuarantineItem{ID: v.ID, SourceID: v.SourceID, SourceName: names[v.SourceID], DeliveryEventID: v.DeliveryEventID, Attempts: v.AttemptCount})
 	}
-	return result, err
+	return result, nil
 }
 func (r *Receiver) Retry(ctx context.Context, id int64) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&entities.RedisUsageInbox{}).Where("id=? AND source_id<>'' AND status IN ?", id, []string{"quarantined", "decode_failed", "discarded"}).Updates(map[string]any{"status": "pending", "attempt_count": 0, "last_error": ""})

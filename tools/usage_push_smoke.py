@@ -4,7 +4,6 @@ import argparse
 import base64
 import concurrent.futures
 import ctypes
-import hashlib
 import http.client
 import json
 import os
@@ -40,11 +39,11 @@ def main():
         port = listener.getsockname()[1]
         listener.close()
         base = f'http://127.0.0.1:{port}'
-        tokens = {f'cpa-smoke-{i:02}': secrets.token_hex(32) for i in range(10)}
-        source_file = root / 'sources.json'
-        source_file.write_text(json.dumps([{'source_id': k, 'token_sha256': hashlib.sha256(v.encode()).hexdigest()} for k, v in tokens.items()]))
+        # Sources and tokens are created through Keeper's settings API after startup.
+        tokens = {}
         env_file = root / 'keeper.env'
-        env_file.write_text(f'INGEST_MODE=push\nINGEST_SOURCES_FILE={source_file}\nWORK_DIR={root / "data"}\nAPP_HOST=127.0.0.1\nAPP_PORT={port}\nAUTH_ENABLED=false\nBACKUP_ENABLED=false\nLOG_FILE_ENABLED=false\nLOG_LEVEL=error\n')
+        # No CPA_BASE_URL: Keeper starts as a push-only receiver.
+        env_file.write_text(f'WORK_DIR={root / "data"}\nAPP_HOST=127.0.0.1\nAPP_PORT={port}\nAUTH_ENABLED=false\nBACKUP_ENABLED=false\nLOG_FILE_ENABLED=false\nLOG_LEVEL=error\n')
         env_file.chmod(0o600)
         log = (root / 'keeper.log').open('w')
         process = None
@@ -134,7 +133,7 @@ def main():
                        'cache_read_tokens': 20, 'cache_read_tokens_present': True, 'cache_creation_tokens': 0, 'total_tokens': 140}
 
         def register(source):
-            config = f'endpoint: {base}/api/v1/ingest/usage\nsource_id: {source}\ntoken: {tokens[source]}\nspool_dir: {root / source}\nflush_interval: 100ms\nrequest_timeout: 15s\nallow_http_loopback: true\n'
+            config = f'endpoint: {base}/api/v1/ingest/usage\ntoken: {tokens[source]}\nspool_dir: {root / source}\nflush_interval: 100ms\nrequest_timeout: 15s\nallow_http_loopback: true\n'
             plugin_call('plugin.register', {'schema_version': 6, 'config_yaml': base64.b64encode(config.encode()).decode()})
 
         def native_event(index):
@@ -146,8 +145,15 @@ def main():
                         'ResponseHeaders': {'Authorization': ['excluded-synthetic-upstream-secret']},
                         'Detail': {'InputTokens': 100, 'OutputTokens': 40, 'ReasoningTokens': 10, 'CachedTokens': 20, 'CacheReadTokens': 20, 'TotalTokens': 140}})
 
+        def create_sources():
+            request('/api/v1/ingest/settings', {'enabled': True}, method='PUT')
+            for i in range(10):
+                issued = request('/api/v1/ingest/sources', {'name': f'cpa-smoke-{i:02}'}, method='POST')
+                tokens[f'cpa-smoke-{i:02}'] = issued['token']
+
         try:
             start_keeper()
+            create_sources()
             request('/api/v1/pricing/models', {'model': 'smoke-model', 'pricing_style': 'openai', 'base_prices': {'input': 2, 'output': 6, 'cache_read': .5, 'cache_write': 0}, 'model_multiplier': 1, 'conditional_multipliers': [], 'branches': []}, 'PUT')
             register('cpa-smoke-00')
             for i in range(3):
@@ -201,7 +207,7 @@ def main():
                                      'generate': True, 'stream': True, 'failed': False, 'latency_ms': 1000, 'ttft_ms': 200,
                                      'fail': {'status_code': 200}, 'accounting_version': 2, 'token_breakdown': breakdown}
                             events.append({'delivery_event_id': f'load-{source_index}-{i}', 'usage': usage})
-                        body = json.dumps({'schema_version': 1, 'source_id': source, 'events': events}, separators=(',', ':'))
+                        body = json.dumps({'schema_version': 1, 'events': events}, separators=(',', ':'))
                         copies = 2 if start % 1000 == 0 else 1
                         duplicate_batches += copies - 1
                         for _ in range(copies):

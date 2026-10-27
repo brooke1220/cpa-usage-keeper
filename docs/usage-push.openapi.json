@@ -85,7 +85,7 @@
             }
           },
           "403": {
-            "description": "Token belongs to another source. Retain and fix configuration.",
+            "description": "Legacy source_id does not match the token's source. Retain and fix configuration.",
             "content": {
               "application/json": {
                 "schema": {
@@ -145,7 +145,7 @@
             }
           },
           "503": {
-            "description": "Receiver unavailable, including migration. Retain and retry.",
+            "description": "Receiver unavailable, including migration, or receiving turned off in Keeper settings (error push_ingest_disabled). Retain and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -168,7 +168,7 @@
       "pushToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Independent random upload token bound to one source. No read or management permissions."
+        "description": "Random upload token created in Keeper Settings > Push receiving. Keeper derives the source from it. No read or management permissions."
       }
     },
     "schemas": {
@@ -177,7 +177,6 @@
         "additionalProperties": false,
         "required": [
           "schema_version",
-          "source_id",
           "events"
         ],
         "properties": {
@@ -189,7 +188,8 @@
           },
           "source_id": {
             "type": "string",
-            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
+            "description": "Deprecated and optional. Older plugins send it; when present it must match the token's source."
           },
           "events": {
             "type": "array",

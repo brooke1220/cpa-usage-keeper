@@ -49,19 +49,21 @@ func (s *cpaAPIKeyService) ListCPAAPIKeys(context.Context) ([]entities.CPAAPIKey
 	return repository.ListActiveCPAAPIKeys(s.db)
 }
 
+// FindActiveCPAAPIKeyByValue 只用于 Key 自助登录：要求 Key 仍在拉取的 CPA 清单里，只经推送出现的 Key 不能登录。
 func (s *cpaAPIKeyService) FindActiveCPAAPIKeyByValue(_ context.Context, apiKey string) (entities.CPAAPIKey, error) {
 	trimmed := strings.TrimSpace(apiKey)
 	if trimmed == "" {
 		return entities.CPAAPIKey{}, gorm.ErrRecordNotFound
 	}
-	return repository.FindActiveCPAAPIKeyByValue(s.db, trimmed)
+	return repository.FindLoginCPAAPIKeyByValue(s.db, trimmed)
 }
 
+// FindActiveCPAAPIKeyByID 校验 Key 查看会话，与登录使用同一可登录条件；Key 离开拉取清单后会话随即失效。
 func (s *cpaAPIKeyService) FindActiveCPAAPIKeyByID(_ context.Context, id int64) (entities.CPAAPIKey, error) {
 	if id <= 0 {
 		return entities.CPAAPIKey{}, gorm.ErrRecordNotFound
 	}
-	return repository.FindActiveCPAAPIKeyByID(s.db, id)
+	return repository.FindLoginCPAAPIKeyByID(s.db, id)
 }
 
 func (s *cpaAPIKeyService) UpdateCPAAPIKeyAlias(_ context.Context, id int64, keyAlias string) (entities.CPAAPIKey, error) {

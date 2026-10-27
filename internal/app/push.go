@@ -20,9 +20,18 @@ import (
 	"gorm.io/gorm"
 )
 
-// buildPushReadyApp only constructs local services. No CPA client exists in this mode.
+// newPushReceiver 加载设置页维护的推送来源和开关；两种装配都创建它，接收路由始终存在，由开关决定是否收数。
+func newPushReceiver(ctx context.Context, db *gorm.DB) (*ingest.Receiver, error) {
+	sources, err := ingest.NewSources(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("load push sources: %w", err)
+	}
+	return ingest.New(db, sources)
+}
+
+// buildPushReadyApp 在没有配置 CPA 时只装配本地服务：不创建任何 CPA 客户端，只接收推送。
 func buildPushReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, ctx context.Context) (*App, error) {
-	receiver, err := ingest.New(db, cfg.IngestSources)
+	receiver, err := newPushReceiver(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +100,7 @@ func buildPushReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Clos
 	keys := service.NewCPAAPIKeyService(db)
 	usage := service.NewUsageServiceWithOptions(db, service.UsageServiceOptions{RecentUsage: recent, PricingCatalog: catalog})
 	ready := &App{Config: &cfg, DB: db, ReadDB: readDB, Poller: status, RedisProcess: process, UsageAggregation: aggregation, LocalRanking: rankingRunner, Maintenance: NewStorageCleanupRunner(syncService), BackupMaintenance: backups, RecentUsageCache: recent, CostReadGate: gate, PricingCatalog: catalog, PricingService: prices, LogCloser: logCloser}
-	ready.Router = api.NewRouter(webui.Static, status, usage, prices, authConfig, api.NewAuthHandler(authConfig, sessions), cfg.AppBasePath, api.OptionalProviders{CostReadGate: gate, CPAAPIKeys: keys, APIKeyTimeUsage: keyTime, LocalRanking: localRanking, WorkHours: workhours.NewService(db, workClock), Ingest: receiver, Status: api.StatusRouteConfig{IngestMode: "push", Ingest: receiver}})
+	ready.Router = api.NewRouter(webui.Static, status, usage, prices, authConfig, api.NewAuthHandler(authConfig, sessions), cfg.AppBasePath, api.OptionalProviders{CostReadGate: gate, CPAAPIKeys: keys, APIKeyTimeUsage: keyTime, LocalRanking: localRanking, WorkHours: workhours.NewService(db, workClock), Ingest: receiver, Status: api.StatusRouteConfig{IngestMode: cfg.IngestMode(), Ingest: receiver}})
 	prepared = true
 	return ready, nil
 }

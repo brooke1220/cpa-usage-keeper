@@ -1140,8 +1140,84 @@ export async function applyPricingSync(request: PricingSyncApplyRequest, signal?
 export interface IngestQuarantineItem {
   id: number
   source_id: string
+  source_name?: string
   delivery_event_id: string
   attempts: number
+}
+
+export interface PushSource {
+  id: number
+  source_id: string
+  name: string
+  token_hint: string
+  revoked: boolean
+  revoked_at?: string
+  last_used_at?: string
+  created_at: string
+}
+
+// token 明文只出现在创建或更换的响应里，页面关闭弹窗后不再保留。
+export interface IssuedPushSource extends PushSource {
+  token: string
+}
+
+export interface PushSettingsResponse {
+  enabled: boolean
+  upload_path: string
+  sources: PushSource[]
+}
+
+export async function fetchPushSettings(signal?: AbortSignal): Promise<PushSettingsResponse> {
+  const response = await apiFetch(apiPath('/ingest/settings'), { signal, cache: 'no-store' })
+  if (!response.ok) await parseApiError(response, 'Failed to load push settings')
+  return response.json()
+}
+
+export async function updatePushEnabled(enabled: boolean): Promise<PushSettingsResponse> {
+  const response = await apiFetch(apiPath('/ingest/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  if (!response.ok) await parseApiError(response, 'Failed to save push settings')
+  return response.json()
+}
+
+export async function createPushSource(name: string): Promise<IssuedPushSource> {
+  const response = await apiFetch(apiPath('/ingest/sources'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!response.ok) await parseApiError(response, 'Failed to create push source')
+  return response.json()
+}
+
+export async function renamePushSource(id: number, name: string): Promise<PushSource> {
+  const response = await apiFetch(apiPath(`/ingest/sources/${id}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!response.ok) await parseApiError(response, 'Failed to rename push source')
+  return response.json()
+}
+
+export async function rotatePushSource(id: number): Promise<IssuedPushSource> {
+  const response = await apiFetch(apiPath(`/ingest/sources/${id}/rotate`), { method: 'POST' })
+  if (!response.ok) await parseApiError(response, 'Failed to rotate push token')
+  return response.json()
+}
+
+export async function setPushSourceRevoked(id: number, revoked: boolean): Promise<PushSource> {
+  const response = await apiFetch(apiPath(`/ingest/sources/${id}/${revoked ? 'revoke' : 'restore'}`), { method: 'POST' })
+  if (!response.ok) await parseApiError(response, 'Failed to update push source')
+  return response.json()
+}
+
+export async function deletePushSource(id: number): Promise<void> {
+  const response = await apiFetch(apiPath(`/ingest/sources/${id}`), { method: 'DELETE' })
+  if (!response.ok) await parseApiError(response, 'Failed to delete push source')
 }
 
 export async function fetchIngestQuarantine(signal?: AbortSignal): Promise<{ items: IngestQuarantineItem[] }> {

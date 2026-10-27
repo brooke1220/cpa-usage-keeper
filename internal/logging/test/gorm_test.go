@@ -3,6 +3,7 @@ package logging_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -98,6 +99,51 @@ func TestGORMLoggerSuppressesRecordNotFound(t *testing.T) {
 	}
 	if output != "" {
 		t.Fatalf("expected record not found to stay silent, got %q", output)
+	}
+}
+
+func TestGORMLoggerDemotesCanceledQueriesToDebug(t *testing.T) {
+	canceledErr := fmt.Errorf("load usage event model filter options: %w", context.Canceled)
+	queryCalls := 0
+	output := captureConsole(t, config.Config{LogLevel: "info"}, func() {
+		logger := logging.NewGORMLogger()
+		logger.Trace(context.Background(), time.Now(), func() (string, int64) {
+			queryCalls++
+			return "SELECT DISTINCT model FROM `usage_events` ORDER BY model ASC", 0
+		}, canceledErr)
+	})
+	if queryCalls != 0 {
+		t.Fatalf("expected canceled query to stay lazy below debug, query calls=%d", queryCalls)
+	}
+	if output != "" {
+		t.Fatalf("expected canceled query to stay silent at info level, got %q", output)
+	}
+
+	output = captureConsole(t, config.Config{LogLevel: "debug"}, func() {
+		logger := logging.NewGORMLogger()
+		logger.Trace(context.Background(), time.Now(), func() (string, int64) {
+			return "SELECT DISTINCT model FROM `usage_events` ORDER BY model ASC", 0
+		}, canceledErr)
+	})
+	plain := ansiPattern.ReplaceAllString(output, "")
+	want := regexp.MustCompile("\\| debug \\| gorm query canceled \\| elapsed=[^ ]+ error=\"load usage event model filter options: context canceled\" rows=0 sql=\"SELECT DISTINCT model FROM `usage_events` ORDER BY model ASC\"\n$")
+	if !want.MatchString(plain) {
+		t.Fatalf("expected canceled query as debug entry, got %q", plain)
+	}
+}
+
+func TestGORMLoggerStillReportsSlowCanceledQuery(t *testing.T) {
+	output := captureConsole(t, config.Config{LogLevel: "info"}, func() {
+		logger := logging.NewGORMLogger()
+		logger.Trace(context.Background(), time.Now().Add(-300*time.Millisecond), func() (string, int64) {
+			return "SELECT * FROM usage_events", 0
+		}, context.Canceled)
+	})
+
+	plain := ansiPattern.ReplaceAllString(output, "")
+	want := regexp.MustCompile(`\| warn  \| gorm slow query \| elapsed=[^ ]+ rows=0 sql="SELECT \* FROM usage_events" threshold=200ms\n$`)
+	if !want.MatchString(plain) {
+		t.Fatalf("expected slow canceled query to remain visible as warning, got %q", plain)
 	}
 }
 

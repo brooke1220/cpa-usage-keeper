@@ -220,6 +220,7 @@ func TestLoadFallsBackToExecutableDirEnv(t *testing.T) {
 func TestLoadFromEnvRequiresCriticalValues(t *testing.T) {
 	withIsolatedEnvFiles(t)
 
+	// CPA 连接可以整体省略（只接收推送），但只填一半仍然是配置错误。
 	t.Run("missing base url", func(t *testing.T) {
 		t.Setenv("CPA_MANAGEMENT_KEY", "secret")
 

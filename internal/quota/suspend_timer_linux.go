@@ -27,12 +27,12 @@ func newSuspendAwareTimer(delay time.Duration) (<-chan time.Time, func(), error)
 	clockID, createFlags, settimeFlags, spec := suspendAwareTimerParameters(delay)
 	fd, err := unix.TimerfdCreate(clockID, createFlags)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, os.NewSyscallError("timerfd_create(CLOCK_BOOTTIME)", err)
 	}
 
 	if err := unix.TimerfdSettime(fd, settimeFlags, &spec, nil); err != nil {
 		_ = unix.Close(fd)
-		return nil, nil, err
+		return nil, nil, os.NewSyscallError("timerfd_settime", err)
 	}
 
 	file := os.NewFile(uintptr(fd), "suspend-aware-timer")

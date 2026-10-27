@@ -156,6 +156,7 @@ func NewRouter(
 	registerStatusRoutes(adminProtected, statusProvider, statusConfig)
 	if len(optionalProviders) > 0 && optionalProviders[0].Ingest != nil {
 		registerIngestAdminRoutes(adminProtected, optionalProviders[0].Ingest)
+		registerPushSourceRoutes(adminProtected, basePath, optionalProviders[0].Ingest.Sources())
 	}
 	registerUpdateRoutes(adminProtected, nil)
 	registerUsageOverviewRoute(adminProtected, usageProvider, cpaAPIKeyProvider)
@@ -331,7 +332,8 @@ func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, con
 	router.GET("/status", func(c *gin.Context) {
 		if config.Ingest != nil {
 			stats, err := config.Ingest.Status(c.Request.Context())
-			if err != nil {
+			// 只接收推送时接收状态就是全部状态；拉取实例的 /status 不能因推送统计出错整体失败。
+			if err != nil && config.IngestMode == "push" {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "ingest status unavailable"})
 				return
 			}
@@ -340,7 +342,11 @@ func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, con
 				state = statusProvider.Status()
 			}
 			response := buildStatusResponse(state, config)
-			response.Ingest = &stats
+			if err != nil {
+				logUnexpectedRequestError(c, "load push ingest status failed", err)
+			} else {
+				response.Ingest = &stats
+			}
 			c.JSON(http.StatusOK, response)
 			return
 		}

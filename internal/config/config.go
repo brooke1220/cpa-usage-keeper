@@ -37,8 +37,6 @@ var (
 )
 
 type Config struct {
-	IngestMode    string
-	IngestSources []PushSource
 	// AppHost 是 Web 服务监听主机；空值保持监听所有可用网络接口的现有行为。
 	AppHost string
 	// AppPort 是 Web 服务监听端口。
@@ -260,6 +258,18 @@ func Load(options LoadOptions) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("APP_BASE_PATH is invalid: %w", err)
 	}
+	// 旧版推送配置已改到设置页；静默忽略会让中心改为拉取并拒收所有 CPA，必须先迁移再启动。
+	// INGEST_MODE=pull 曾是示例文件里的默认行，与当前行为一致，只提示删除。
+	ingestMode := strings.ToLower(strings.TrimSpace(os.Getenv("INGEST_MODE")))
+	if ingestMode == "pull" {
+		logrus.Warn("INGEST_MODE is no longer used and can be removed; Keeper pulls when CPA_BASE_URL is set")
+	} else if ingestMode != "" || strings.TrimSpace(os.Getenv("INGEST_SOURCES_FILE")) != "" {
+		key := "INGEST_MODE"
+		if ingestMode == "" {
+			key = "INGEST_SOURCES_FILE"
+		}
+		return nil, fmt.Errorf("%s is no longer supported; remove INGEST_MODE and INGEST_SOURCES_FILE, leave CPA_BASE_URL and CPA_MANAGEMENT_KEY empty for a push-only receiver, then turn on receiving and create a token for each CPA in Settings > Push receiving", key)
+	}
 	if strings.TrimSpace(os.Getenv("AUTH_OIDC_ALLOWED_USERS")) != "" {
 		return nil, fmt.Errorf("AUTH_OIDC_ALLOWED_USERS is no longer supported; migrate exact subjects to AUTH_OIDC_ALLOWED_SUBJECTS (JSON string array) or manage access at the identity provider before removing the old setting")
 	}
@@ -286,20 +296,7 @@ func Load(options LoadOptions) (*Config, error) {
 
 	workDir := getString("WORK_DIR", DefaultWorkDir)
 
-	mode := strings.ToLower(getString("INGEST_MODE", "pull"))
-	if mode != "pull" && mode != "push" {
-		return nil, fmt.Errorf("INGEST_MODE must be pull or push")
-	}
-	var sources []PushSource
-	if mode == "push" {
-		sources, err = LoadPushSources(strings.TrimSpace(os.Getenv("INGEST_SOURCES_FILE")))
-		if err != nil {
-			return nil, err
-		}
-	}
 	cfg := &Config{
-		IngestMode:                    mode,
-		IngestSources:                 sources,
 		AppHost:                       strings.TrimSpace(os.Getenv("APP_HOST")),
 		AppPort:                       getString("APP_PORT", "8080"),
 		AppBasePath:                   appBasePath,
@@ -339,11 +336,15 @@ func Load(options LoadOptions) (*Config, error) {
 	if appHost := strings.TrimSpace(options.AppHost); appHost != "" {
 		cfg.AppHost = appHost
 	}
-	if !cfg.PushMode() && cfg.CPABaseURL == "" {
+	// CPA 连接可以整体省略，此时 Keeper 只接收设置页登记的推送来源；只填一半一定是配置错误。
+	if cfg.CPABaseURL == "" && cfg.CPAManagementKey != "" {
 		return nil, fmt.Errorf("CPA_BASE_URL is required")
 	}
-	if !cfg.PushMode() && cfg.CPAManagementKey == "" {
+	if cfg.CPABaseURL != "" && cfg.CPAManagementKey == "" {
 		return nil, fmt.Errorf("CPA_MANAGEMENT_KEY is required")
+	}
+	if !cfg.CPAConfigured() {
+		logrus.Info("CPA_BASE_URL is not set; Keeper runs as a push-only usage receiver")
 	}
 	if cfg.AuthEnabled {
 		if cfg.LoginPassword == "" && authEnabledValue == "" {

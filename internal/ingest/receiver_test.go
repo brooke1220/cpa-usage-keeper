@@ -27,8 +27,35 @@ import (
 
 func testReceiver(t *testing.T) (*Receiver, *gorm.DB) {
 	t.Helper()
-	cfg := config.Config{SQLitePath: filepath.Join(t.TempDir(), "push.db"), IngestMode: "push"}
-	db, err := repository.OpenDatabase(cfg)
+	db := openIngestTestDB(t)
+	sources, err := NewSources(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 固定内部 ID 和 token，便于断言来源隔离；生产路径的随机生成另有测试覆盖。
+	for _, v := range []struct{ id, token string }{{"cpa-one", strings.Repeat("a", 32)}, {"cpa-two", strings.Repeat("b", 32)}} {
+		issued, err := sources.Create(context.Background(), v.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := sha256.Sum256([]byte(v.token))
+		if err := db.Model(&entities.PushSource{}).Where("id = ?", issued.ID).Updates(map[string]any{"source_id": v.id, "token_sha256": hex.EncodeToString(hash[:])}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sources.SetEnabled(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	receiver, err := New(db, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return receiver, db
+}
+
+func openIngestTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "push.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,16 +64,7 @@ func testReceiver(t *testing.T) (*Receiver, *gorm.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	sources := []config.PushSource{}
-	for _, v := range []struct{ id, token string }{{"cpa-one", strings.Repeat("a", 32)}, {"cpa-two", strings.Repeat("b", 32)}} {
-		hash := sha256.Sum256([]byte(v.token))
-		sources = append(sources, config.PushSource{SourceID: v.id, TokenSHA256: hex.EncodeToString(hash[:])})
-	}
-	receiver, err := New(db, sources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return receiver, db
+	return db
 }
 
 func fixture() json.RawMessage {

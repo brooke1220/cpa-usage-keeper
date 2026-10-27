@@ -164,12 +164,12 @@ func RunDatabaseMigrationsWithBackup(ctx context.Context, writer, backupSource *
 // OpenDatabaseConnection 只打开唯一 writer 并设置连接级 SQLite 约束，不执行建表或业务迁移。
 func OpenDatabaseConnection(cfg config.Config) (*gorm.DB, error) {
 	// SQLite DSN 统一补齐 busy_timeout/foreign_keys，调用方只需要传项目配置里的路径。
-	if cfg.PushMode() && !sqliteDatabaseRequiresSinglePool(cfg.SQLitePath) {
+	if !sqliteDatabaseRequiresSinglePool(cfg.SQLitePath) {
 		filename, _, _ := strings.Cut(strings.TrimSpace(cfg.SQLitePath), "?")
 		if strings.HasPrefix(filename, "file:") {
 			parsed, errParse := url.Parse(filename)
 			if errParse != nil {
-				return nil, fmt.Errorf("parse push database path: %w", errParse)
+				return nil, fmt.Errorf("parse database path: %w", errParse)
 			}
 			filename = parsed.Path
 			if filename == "" {
@@ -177,29 +177,24 @@ func OpenDatabaseConnection(cfg config.Config) (*gorm.DB, error) {
 			}
 		}
 		if errDir := os.MkdirAll(filepath.Dir(filename), 0700); errDir != nil {
-			return nil, fmt.Errorf("create push database directory: %w", errDir)
+			return nil, fmt.Errorf("create database directory: %w", errDir)
 		}
 	}
-	dsn := sqliteDSN(cfg.SQLitePath)
-	if cfg.PushMode() {
-		filename, rawQuery, _ := strings.Cut(dsn, "?")
-		query, errQuery := url.ParseQuery(rawQuery)
-		if errQuery != nil {
-			return nil, fmt.Errorf("parse push SQLite options: %w", errQuery)
-		}
-		query.Del("_sync")
-		query.Set("_synchronous", "FULL")
-		query.Del("_journal")
-		query.Set("_journal_mode", "WAL")
-		dsn = filename + "?" + query.Encode()
+	// 推送接收随时可能在设置页打开，ACK 承诺的“已持久化”不能依赖启动模式：写连接一律 FULL + WAL。
+	filename, rawQuery, _ := strings.Cut(sqliteDSN(cfg.SQLitePath), "?")
+	query, errQuery := url.ParseQuery(rawQuery)
+	if errQuery != nil {
+		return nil, fmt.Errorf("parse SQLite options: %w", errQuery)
 	}
+	query.Del("_sync")
+	query.Set("_synchronous", "FULL")
+	query.Del("_journal")
+	query.Set("_journal_mode", "WAL")
+	dsn := filename + "?" + query.Encode()
 	// GORM 自动时间也先落到项目 TZ，再由 storageTime serializer 输出统一字符串。
-	queryLogger := logging.NewGORMLogger()
-	if cfg.PushMode() {
-		queryLogger = logging.WithoutSQLParameters(queryLogger)
-	}
+	// 绑定参数可能含完整 API Key、上传 token 哈希或原始用量，SQL 诊断日志一律不输出参数。
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger:  queryLogger,
+		Logger:  logging.WithoutSQLParameters(logging.NewGORMLogger()),
 		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
 	})
 	if err != nil {
@@ -224,11 +219,9 @@ func OpenDatabaseConnection(cfg config.Config) (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(sqliteWriterMaxIdleConnections)
 
 	// WAL 让读写并发更友好，但 writer 之间仍串行；读取 PRAGMA 返回值，不能把“执行无报错”误当成已经进入 WAL。
-	if cfg.PushMode() {
-		var syncMode int
-		if errSync := db.Raw("PRAGMA synchronous").Scan(&syncMode).Error; errSync != nil || syncMode != 2 {
-			return nil, fmt.Errorf("push ingestion requires synchronous=FULL")
-		}
+	var syncMode int
+	if errSync := db.Raw("PRAGMA synchronous").Scan(&syncMode).Error; errSync != nil || syncMode != 2 {
+		return nil, fmt.Errorf("sqlite writer requires synchronous=FULL")
 	}
 	var journalMode string
 	if err := db.Raw("PRAGMA journal_mode=WAL").Scan(&journalMode).Error; err != nil {

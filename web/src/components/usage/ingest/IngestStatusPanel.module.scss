@@ -3,3 +3,7 @@
 .list { margin-top: 12px; font-size: 13px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border-color, #64748b40); }
 .row code { overflow-wrap: anywhere; }
+.notice { margin: 10px 0 0; color: var(--text-secondary); font-size: 13px; }
+.sources { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--text-secondary); }
+.sources li { display: inline-flex; gap: 8px; }
+.sources li span:first-child { color: var(--text-primary); font-weight: 600; }
