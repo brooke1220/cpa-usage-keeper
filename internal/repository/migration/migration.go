@@ -337,6 +337,9 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationAddUsageEventEffectiveServiceTier, run: addUsageEventEffectiveServiceTierMigration},
 		{version: "20261026_push_ingest", run: pushIngestMigration},
 		{version: migrationPushSources, run: pushSourcesMigration},
+		{version: migrationPushUsageIdentities, run: pushUsageIdentitiesMigration},
+		{version: migrationPushUsageIdentityObservedAt, run: pushUsageIdentityObservedAtMigration},
+		{version: migrationUsageEventSourceIDIndex, run: usageEventSourceIDIndexMigration},
 	}
 }
 

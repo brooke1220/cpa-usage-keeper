@@ -4,6 +4,7 @@ package entities
 func All() []any {
 	return []any{
 		&PushSource{},
+		&PushUsageIdentity{},
 		&PushReceipt{},
 		&UsageEvent{},
 		&UsageEventArchive{},

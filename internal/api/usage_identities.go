@@ -372,7 +372,7 @@ func validateUsageIdentityAlias(value string) error {
 		return errors.New("alias is too long")
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) || isDisallowedUsageIdentityAliasFormatRune(r) {
+		if unicode.IsControl(r) || helper.IsInvisibleFormatRune(r) {
 			return errors.New("alias cannot contain control or invisible formatting characters")
 		}
 	}
@@ -404,21 +404,6 @@ func parseUpdateUsageIdentityAliasRequest(c *gin.Context) (string, bool) {
 		return "", false
 	}
 	return alias, true
-}
-
-func isDisallowedUsageIdentityAliasFormatRune(r rune) bool {
-	switch {
-	case r == '\u061c' || r == '\u180e' || r == '\u200b' || r == '\u200c' || r == '\u2060' || r == '\ufeff':
-		return true
-	case r == '\u200e' || r == '\u200f':
-		return true
-	case r >= '\u202a' && r <= '\u202e':
-		return true
-	case r >= '\u2066' && r <= '\u2069':
-		return true
-	default:
-		return false
-	}
 }
 
 func mapUsageCredentialHealthResponse(snapshot *service.UsageCredentialHealthSnapshot) *usageCredentialHealthResponse {

@@ -778,6 +778,14 @@ func TestUsageEventsExportCSVFormatsUntrustedMetadataAsText(t *testing.T) {
 		ClientIP:             new("=1+1"),
 		XForwardedFor:        new("+SUM(1,1)"),
 		UserAgent:            new("@HYPERLINK(\"https://example.invalid\")"),
+		Model:                "=HYPERLINK(\"https://example.invalid\",\"m\")",
+		ModelAlias:           "+alias",
+		ResponseModel:        "-response",
+		ReasoningEffort:      "@effort",
+		ServiceTier:          "=tier",
+		ResponseServiceTier:  "+tier",
+		ExecutorType:         "-executor",
+		Endpoint:             "@endpoint",
 	}}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
 	resp := serveAPIGet(router, "/api/v1/usage/events/export?range=24h&format=csv")
@@ -801,6 +809,15 @@ func TestUsageEventsExportCSVFormatsUntrustedMetadataAsText(t *testing.T) {
 		"client_ip":              "'=1+1",
 		"x_forwarded_for":        "'+SUM(1,1)",
 		"user_agent":             "'@HYPERLINK(\"https://example.invalid\")",
+		// 推送来源可以控制这些字段，导出时同样只能作为文本。
+		"model":                 "'=HYPERLINK(\"https://example.invalid\",\"m\")",
+		"model_alias":           "'+alias",
+		"response_model":        "'-response",
+		"reasoning_effort":      "'@effort",
+		"service_tier":          "'=tier",
+		"response_service_tier": "'+tier",
+		"executor_type":         "'-executor",
+		"endpoint":              "'@endpoint",
 	} {
 		index, ok := columnIndexes[column]
 		if !ok {

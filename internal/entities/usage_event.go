@@ -7,7 +7,7 @@ import (
 
 // UsageEvent 是落库后的单条 usage 请求事件实体。
 type UsageEvent struct {
-	ID                   int64 `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3;index:idx_usage_events_auth_index_timestamp_id,priority:3"`
+	ID                   int64 `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3;index:idx_usage_events_auth_index_timestamp_id,priority:3;index:idx_usage_events_source_id_timestamp_id,priority:3"`
 	EventKey             string
 	APIGroupKey          string    `gorm:"index:idx_usage_events_api_group_key_timestamp,priority:1"`
 	Provider             string    `gorm:"column:provider"`
@@ -32,7 +32,7 @@ type UsageEvent struct {
 	EffectiveServiceTier string    `gorm:"column:effective_service_tier;not null;default:''"`
 	ResponseServiceTier  string    `gorm:"column:response_service_tier;not null;default:''"`
 	ExecutorType         string    `gorm:"column:executor_type;not null;default:''"`
-	Timestamp            time.Time `gorm:"serializer:storageTime;index:idx_usage_events_timestamp_id,sort:desc,priority:1;index:idx_usage_events_auth_index_timestamp_id,priority:2;index:idx_usage_events_api_group_key_timestamp,priority:2"`
+	Timestamp            time.Time `gorm:"serializer:storageTime;index:idx_usage_events_timestamp_id,sort:desc,priority:1;index:idx_usage_events_auth_index_timestamp_id,priority:2;index:idx_usage_events_api_group_key_timestamp,priority:2;index:idx_usage_events_source_id_timestamp_id,priority:2"`
 	Source               string
 	AuthIndex            string `gorm:"index:idx_usage_events_auth_index;index:idx_usage_events_auth_type_auth_index_id,priority:2;index:idx_usage_events_auth_index_timestamp_id,priority:1"`
 	Failed               bool
@@ -53,9 +53,10 @@ type UsageEvent struct {
 	AccountingVersion json.RawMessage `gorm:"-" json:"-"`
 	TokenBreakdown    json.RawMessage `gorm:"-" json:"-"`
 	// 费用回填前保持 NULL；正常入库必须同时明确金额与可用性。
-	CostUSD         *float64  `gorm:"column:cost_usd;type:real"`
-	CostAvailable   *bool     `gorm:"column:cost_available;type:boolean"`
-	CreatedAt       time.Time `gorm:"serializer:storageTime"`
-	SourceID        string    `gorm:"not null;default:''"`
-	DeliveryEventID string    `gorm:"not null;default:''"`
+	CostUSD       *float64  `gorm:"column:cost_usd;type:real"`
+	CostAvailable *bool     `gorm:"column:cost_available;type:boolean"`
+	CreatedAt     time.Time `gorm:"serializer:storageTime"`
+	// 部分索引只覆盖推送行，支撑按 CPA 筛选；纯拉取部署的写入不增加索引维护。
+	SourceID        string `gorm:"not null;default:'';index:idx_usage_events_source_id_timestamp_id,priority:1,where:source_id <> ''"`
+	DeliveryEventID string `gorm:"not null;default:''"`
 }

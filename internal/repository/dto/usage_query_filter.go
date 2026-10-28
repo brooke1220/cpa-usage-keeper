@@ -25,6 +25,7 @@ type UsageQueryFilter struct {
 	SkipTotalCount  bool
 	Model           string
 	AuthIndex       string
+	SourceID        string
 	AuthType        string
 	APIGroupKey     string
 	Result          string

@@ -309,6 +309,8 @@ export interface UsageEvent {
   endpoint?: string
   source: string
   source_raw?: string
+  source_id?: string
+  source_name?: string
   source_type?: string
   auth_index?: string
   isDelete?: boolean

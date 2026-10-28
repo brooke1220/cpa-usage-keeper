@@ -177,6 +177,8 @@ type RequestEventRow = {
   sourceRaw: string;
   source: string;
   sourceType: string;
+  sourceId: string;
+  sourceName: string;
   authIndex: string;
   isDelete: boolean;
   failed: boolean;
@@ -696,8 +698,10 @@ export function RequestEventsDetailsCard({
         sourceRaw: sourceRaw || '-',
         source,
         sourceType,
+        sourceId: String(event.source_id ?? '').trim(),
+        sourceName: String(event.source_name ?? '').trim(),
         authIndex,
-        isDelete: event.isDelete === true,
+        isDelete: !event.source_id && event.isDelete === true,
         failed: event.failed === true,
         latencyMs,
         latencyLabel: formatDurationMs(latencyMs),
@@ -928,13 +932,19 @@ export function RequestEventsDetailsCard({
         label: t('usage_stats.request_events_source'),
         header: <th>{t('usage_stats.request_events_source')}</th>,
         renderCell: (row) => (
-          <td className={styles.requestEventsSourceCell} title={row.source}>
+          <td className={styles.requestEventsSourceCell} title={row.sourceId ? `${row.source} · ${row.sourceName || row.sourceId}` : row.source}>
             <span className={styles.requestEventsSourceStack}>
               <span className={styles.requestEventsSourceIdentity}>
                 <ProviderBrandIcon providerType={row.sourceType} size={25} />
                 <span className={styles.requestEventsSourceValue}>{row.source}</span>
               </span>
-              {row.isDelete ? (
+              {row.sourceId ? (
+                <span className={styles.requestEventsSourceTags}>
+                  <span className={`${styles.credentialType} ${styles.requestEventsPushTag}`}>
+                    {t('usage_stats.pushed')} · {row.sourceName || row.sourceId.slice(-8)}
+                  </span>
+                </span>
+              ) : row.isDelete ? (
                 <span className={styles.requestEventsSourceTags}>
                   <span className={styles.requestEventsDeletedTag}>{t('usage_stats.deleted')}</span>
                 </span>

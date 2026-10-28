@@ -118,6 +118,7 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 		"idx_usage_events_model",
 		"idx_usage_events_auth_type_auth_index_id",
 		"idx_usage_events_auth_index_timestamp_id",
+		"idx_usage_events_source_id_timestamp_id",
 		"uniq_usage_overview_hourly_stats_dimensions",
 		"idx_usage_overview_hourly_stats_api_bucket",
 		"idx_usage_overview_hourly_stats_api_model_bucket",

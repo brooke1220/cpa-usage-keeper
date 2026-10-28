@@ -12,6 +12,7 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/ingest"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"cpa-usage-keeper/internal/timeutil"
@@ -58,6 +59,8 @@ type usageEventPayload struct {
 	ExecutorType         string                 `json:"executor_type,omitempty"`
 	Endpoint             string                 `json:"endpoint,omitempty"`
 	Source               string                 `json:"source"`
+	SourceID             string                 `json:"source_id,omitempty"`
+	SourceName           string                 `json:"source_name,omitempty"`
 	SourceRaw            string                 `json:"source_raw,omitempty"`
 	SourceType           string                 `json:"source_type,omitempty"`
 	AuthIndex            string                 `json:"auth_index,omitempty"`
@@ -110,6 +113,8 @@ type usageEventExportPayload struct {
 	APIKey               string   `json:"api_key"`
 	CPAAPIKeyID          string   `json:"cpa_api_key_id"`
 	Source               string   `json:"source"`
+	SourceID             string   `json:"source_id,omitempty"`
+	SourceName           string   `json:"source_name,omitempty"`
 	SourceType           string   `json:"source_type"`
 	AuthIndex            string   `json:"auth_index"`
 	IsIdentityDeleted    bool     `json:"is_identity_deleted"`
@@ -153,6 +158,7 @@ func registerUsageEventsRoute(
 	requestLogProvider service.RequestLogProvider,
 	requestLogDownloadTokens *requestLogDownloadTokenStore,
 	requestLogAccessEnabled bool,
+	pushSources *ingest.Sources,
 ) {
 	exportSlots := make(chan struct{}, usageEventsExportMaxConcurrency)
 
@@ -170,6 +176,12 @@ func registerUsageEventsRoute(
 		if err != nil {
 			writeInternalError(c, "list usage event source filter options failed", err)
 			return
+		}
+		// 推送目录读取失败只去掉推送选项，本机来源筛选仍然可用。
+		if resolver, err := loadUsageEventResolver(c, nil, pushSources); err != nil {
+			logUnexpectedRequestError(c, "load pushed usage sources failed", err)
+		} else {
+			sources = append(sources, pushedUsageSourceFilterOptions(resolver)...)
 		}
 		c.JSON(http.StatusOK, gin.H{"sources": sources})
 	})
@@ -196,12 +208,11 @@ func registerUsageEventsRoute(
 			return
 		}
 
-		identities, err := loadUsageResolutionData(c, usageIdentityProvider)
+		resolver, err := loadUsageEventPageResolver(c, usageIdentityProvider, pushSources, rows.Events)
 		if err != nil {
 			writeInternalError(c, "load usage resolution data failed", err)
 			return
 		}
-		resolver := newUsageIdentityResolver(identities)
 		apiKeyInfos, err := loadCPAAPIKeyInfos(c, cpaAPIKeyProvider)
 		if err != nil {
 			return
@@ -302,12 +313,11 @@ func registerUsageEventsRoute(
 		filter.PageSize = 0
 		filter.Offset = 0
 
-		identities, err := loadUsageResolutionData(c, usageIdentityProvider)
+		resolver, err := loadUsageEventResolver(c, usageIdentityProvider, pushSources)
 		if err != nil {
 			writeInternalError(c, "load usage resolution data failed", err)
 			return
 		}
-		resolver := newUsageIdentityResolver(identities)
 		apiKeyInfos, err := loadCPAAPIKeyInfos(c, cpaAPIKeyProvider)
 		if err != nil {
 			return
@@ -415,7 +425,14 @@ func applyUsageEventsSourceFilter(filter *servicedto.UsageFilter) error {
 	if source == "" {
 		return nil
 	}
-	filter.AuthIndex = source
+	if sourceID, pushed := strings.CutPrefix(source, pushSourceFilterPrefix); pushed {
+		if sourceID == "" {
+			return errors.New("invalid push source filter")
+		}
+		filter.SourceID = sourceID
+	} else {
+		filter.AuthIndex = source
+	}
 	filter.Source = ""
 	return nil
 }
@@ -427,7 +444,7 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 	}
 	payload := make([]usageEventPayload, 0, len(rows))
 	for _, row := range rows {
-		identity, matched := resolver.resolveByAuthIndex(row.AuthIndex)
+		identity, matched := resolver.resolveEvent(row)
 		source, isDelete := usageEventPublicSource(row, identity, matched)
 		id := ""
 		if row.ID != 0 {
@@ -450,6 +467,8 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 			ExecutorType:         strings.TrimSpace(row.ExecutorType),
 			Endpoint:             strings.TrimSpace(row.Endpoint),
 			Source:               source,
+			SourceID:             row.SourceID,
+			SourceName:           resolver.pushSourceNames[row.SourceID],
 			SourceType:           identity.Type,
 			AuthIndex:            row.AuthIndex,
 			RequestID:            strings.TrimSpace(row.RequestID),
@@ -514,7 +533,7 @@ func writeUsageEventRequestLogError(c *gin.Context, err error) {
 }
 
 func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usageIdentityResolver, apiKeyInfos map[string]analysisAPIKeyInfo) usageEventExportPayload {
-	identity, matched := resolver.resolveByAuthIndex(row.AuthIndex)
+	identity, matched := resolver.resolveEvent(row)
 	source, isIdentityDeleted := usageEventPublicSource(row, identity, matched)
 	id := ""
 	if row.ID != 0 {
@@ -530,6 +549,8 @@ func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usag
 		APIKey:               usageEventAPIKeyLabel(row.APIGroupKey, apiKeyInfos),
 		CPAAPIKeyID:          usageEventCPAAPIKeyID(row.APIGroupKey, apiKeyInfos),
 		Source:               source,
+		SourceID:             row.SourceID,
+		SourceName:           resolver.pushSourceNames[row.SourceID],
 		SourceType:           identity.Type,
 		AuthIndex:            strings.TrimSpace(row.AuthIndex),
 		IsIdentityDeleted:    isIdentityDeleted,
@@ -612,6 +633,8 @@ var usageEventsExportCSVHeader = []string{
 	"cache_read_tokens",
 	"cache_creation_tokens",
 	"cache_read_rate",
+	"source_id",
+	"source_name",
 	"total_tokens",
 	"cost_usd",
 }
@@ -783,24 +806,25 @@ func usageEventExportCSVRecord(event usageEventExportPayload) []string {
 	return []string{
 		event.ID,
 		event.Timestamp,
-		event.APIKey,
+		// 推送来源能控制 Key、模型、档位和端点等文本，导出时统一按文本防公式注入。
+		formatOptionalCSVText(&event.APIKey),
 		event.CPAAPIKeyID,
-		event.Source,
-		event.SourceType,
+		formatOptionalCSVText(&event.Source),
+		formatOptionalCSVText(&event.SourceType),
 		event.AuthIndex,
 		strconv.FormatBool(event.IsIdentityDeleted),
-		event.Model,
-		event.ModelAlias,
-		event.ResponseModel,
-		event.ReasoningEffort,
-		event.ServiceTier,
+		formatOptionalCSVText(&event.Model),
+		formatOptionalCSVText(&event.ModelAlias),
+		formatOptionalCSVText(&event.ResponseModel),
+		formatOptionalCSVText(&event.ReasoningEffort),
+		formatOptionalCSVText(&event.ServiceTier),
 		formatOptionalCSVText(&event.EffectiveServiceTier),
-		event.ResponseServiceTier,
-		event.ExecutorType,
+		formatOptionalCSVText(&event.ResponseServiceTier),
+		formatOptionalCSVText(&event.ExecutorType),
 		event.Result,
 		formatOptionalInt(event.StatusCode),
 		formatOptionalBool(event.Stream),
-		event.Endpoint,
+		formatOptionalCSVText(&event.Endpoint),
 		formatOptionalInt64(event.TTFTMS),
 		strconv.FormatInt(event.LatencyMS, 10),
 		formatOptionalFloat64(event.SpeedTPS),
@@ -813,6 +837,8 @@ func usageEventExportCSVRecord(event usageEventExportPayload) []string {
 		strconv.FormatInt(event.CacheReadTokens, 10),
 		strconv.FormatInt(event.CacheCreationTokens, 10),
 		formatOptionalFloat64(event.CacheReadRate),
+		event.SourceID,
+		formatOptionalCSVText(&event.SourceName),
 		strconv.FormatInt(event.TotalTokens, 10),
 		strconv.FormatFloat(event.CostUSD, 'f', -1, 64),
 	}
@@ -887,7 +913,7 @@ func usageEventPublicSource(row servicedto.UsageEventRecord, identity resolvedUs
 	if matched {
 		return identity.DisplayName, false
 	}
-	isDelete := strings.TrimSpace(row.AuthIndex) != ""
+	isDelete := row.SourceID == "" && strings.TrimSpace(row.AuthIndex) != ""
 	switch strings.TrimSpace(row.AuthType) {
 	case "apikey":
 		return strings.TrimSpace(row.Provider), isDelete

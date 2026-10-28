@@ -48,3 +48,22 @@ python3 tools/usage_push_smoke.py --keeper /absolute/path/to/keeper \
 ```
 
 The script verifies its own temporary receiver and cleans it up. The native library must match the test machine. Linux shared-library loading is additionally checked by the plugin Dockerfile.
+
+## Credential display metadata validation — 2026-10-27
+
+Validated against the official CPA v8.0.44 callback definitions and plugin v0.5.3 as the implementation base. The credential-name lookup uses only the existing read-only host callback; no CPA source changes or request interception were introduced.
+
+- The full Keeper backend run passed across `./cmd/... ./internal/...`, including migration ordering, additive upgrade preservation, request-event list/filter/export behavior, local ranking and production startup tests. The release-script tests used Python 3.11.15, because the system Python 3.9 cannot execute their existing `Path.write_text(newline=...)` call.
+- The plugin's full `go test -race ./...` passed; additional cache tests passed with the race detector, covering cached names, expiry, failed lookups, retained names after a failed refresh, bounded metadata, secret exclusion and concurrent reads.
+- Frontend verification used Node.js 24.22.1: 206 test files / 1,630 tests, lint, typecheck and production build all passed. The build retains its existing large-chunk advisory.
+- The extended native smoke test loaded the compiled plugin through the real C ABI against a temporary Keeper database. A simulated CPA host supplied display metadata and deliberately included secret-bearing callback fields. Six native records required two cached host lookups; names, provider icons, reasoning effort and service tiers reached the actual request-event API. The run then replayed 100,000 events across ten sources with 100 duplicate batches. All 100,006 unique events and receipts reconciled, with zero quarantine or forbidden callback-field leaks, correct token/cost totals and all four API Key views verified.
+- The saved local Postman simulation returned 503 and then 200 to the real plugin upload code. Both requests carried the same delivery ID, `identity.display_name`, provider type, reasoning effort and all three service-tier values; the first failure retained the queued record and the ACK cleared it. Nothing was published to a workspace.
+- Desktop browser checks against the compiled temporary Keeper verified Chinese source names, neutral push badges, CPA and credential selector options, a successful CPA filter and light/dark rendering. Screenshots used synthetic events. Mobile viewport and deployed-server checks were not performed.
+
+The native lookup test uses a simulated CPA callback, not a live production CPA installation. No production data, running deployment, release tag or upstream repository was changed.
+
+## Credential observation ordering — 2026-10-28
+
+- Credential observation times use fixed-width UTC storage. Receiver regressions cover whole seconds, different fractional precisions down to nanoseconds, daylight-saving fallback and delayed older deliveries.
+- The additive `20261028_push_usage_identity_observed_at` migration normalizes earlier timestamp formats without changing their instants or credential metadata. Tests cover repeated startup, rollback on an invalid timestamp, preservation of usage/ranking data and continued ingestion after migrating a catalog written in another timezone.
+- Verification passed with Go 1.26.10 and Node.js 24.22.1: the full `go test ./cmd/... ./internal/...` run, all 206 frontend test files / 1,630 tests, lint, typecheck, production build and `git diff --check`. The build retains its existing large-chunk advisory. Native-plugin smoke and browser visual checks were not rerun for this timestamp-only fix.

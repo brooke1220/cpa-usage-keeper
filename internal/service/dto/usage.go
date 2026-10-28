@@ -35,6 +35,7 @@ type UsageFilter struct {
 	SkipTotalCount  bool
 	Model           string
 	Source          string
+	SourceID        string
 	AuthIndex       string
 	AuthType        string
 	APIKeyID        string
@@ -77,6 +78,7 @@ type UsageEventRecord struct {
 	RequestID            string
 	Provider             string
 	Source               string
+	SourceID             string
 	AuthIndex            string
 	Failed               bool
 	StatusCode           *int

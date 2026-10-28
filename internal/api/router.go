@@ -167,7 +167,11 @@ func NewRouter(
 	}
 	registerUsageActivityRoute(adminProtected, usageProvider)
 	registerUsageAnalysisRoute(adminProtected, usageProvider, cpaAPIKeyProvider)
-	registerUsageEventsRoute(adminProtected, usageProvider, usageIdentityProvider, cpaAPIKeyProvider, requestLogProvider, requestLogDownloadTokens, statusConfig.CPARequestLogAccessEnabled)
+	var pushSources *ingest.Sources
+	if len(optionalProviders) > 0 && optionalProviders[0].Ingest != nil {
+		pushSources = optionalProviders[0].Ingest.Sources()
+	}
+	registerUsageEventsRoute(adminProtected, usageProvider, usageIdentityProvider, cpaAPIKeyProvider, requestLogProvider, requestLogDownloadTokens, statusConfig.CPARequestLogAccessEnabled, pushSources)
 	if statusConfig.IngestMode != "push" {
 		registerUsageIdentityRoutes(adminProtected, usageIdentityProvider)
 		registerErrorEventRoutes(adminProtected, errorEventProvider)

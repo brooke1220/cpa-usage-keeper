@@ -316,6 +316,23 @@ func (s *Sources) SourceNames(ctx context.Context) (map[string]string, error) {
 	return names, nil
 }
 
+// UsageIdentities returns display metadata only; it grants no remote credential operations.
+func (s *Sources) UsageIdentities(ctx context.Context) ([]entities.PushUsageIdentity, error) {
+	var rows []entities.PushUsageIdentity
+	err := s.db.WithContext(ctx).Find(&rows).Error
+	return rows, err
+}
+
+// UsageIdentitiesFor 只读取指定凭据的展示名称，请求事件列表每页最多 100 个。
+func (s *Sources) UsageIdentitiesFor(ctx context.Context, authIndexes []string) ([]entities.PushUsageIdentity, error) {
+	if len(authIndexes) == 0 {
+		return nil, nil
+	}
+	var rows []entities.PushUsageIdentity
+	err := s.db.WithContext(ctx).Where("auth_index IN ?", authIndexes).Find(&rows).Error
+	return rows, err
+}
+
 func toSource(row entities.PushSource) Source {
 	return Source{ID: row.ID, SourceID: row.SourceID, Name: row.Name, TokenHint: row.TokenHint, Revoked: row.RevokedAt != nil, RevokedAt: row.RevokedAt, LastUsedAt: row.LastUsedAt, CreatedAt: row.CreatedAt}
 }

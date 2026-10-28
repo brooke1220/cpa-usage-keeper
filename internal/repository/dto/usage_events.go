@@ -38,6 +38,7 @@ type UsageEventRecord struct {
 	RequestID            string
 	Provider             string
 	Source               string
+	SourceID             string
 	AuthIndex            string
 	Failed               bool
 	StatusCode           *int

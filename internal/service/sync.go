@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"math"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
@@ -305,7 +305,7 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, writeDB *gorm.D
 		if row.SourceID != "" {
 			event.SourceID, event.DeliveryEventID = row.SourceID, row.DeliveryEventID
 			if event.AuthIndex != "" {
-				event.AuthIndex = "push." + base64.RawURLEncoding.EncodeToString([]byte(row.SourceID)) + "." + base64.RawURLEncoding.EncodeToString([]byte(event.AuthIndex))
+				event.AuthIndex = helper.ScopedPushAuthIndex(row.SourceID, event.AuthIndex)
 			}
 		}
 		validRows = append(validRows, row)

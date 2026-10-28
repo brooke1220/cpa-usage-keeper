@@ -104,6 +104,9 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20261023_usage_event_effective_service_tier",
 		"20261026_push_ingest",
 		"20261027_push_sources",
+		"20261027_push_usage_identities",
+		"20261028_push_usage_identity_observed_at",
+		"20261028_usage_event_source_id_index",
 	}
 	assertStringSlicesEqual(t, want, got)
 }

@@ -151,3 +151,15 @@ git diff --check
 - 拉取同步只撤自己的 `pull_seen`，推送登记的 Key 不会被删除，别名和排行头像随行保留；Key 自助登录只认 `pull_seen`。迁移按已入库的推送用量回填 `push_seen`；旧库从未拉取时同时撤销这些 Key 的 `pull_seen`。
 - 仍设置 `INGEST_SOURCES_FILE` 或 `INGEST_MODE=push` 时拒绝启动，提示改用设置页，避免旧中心被静默改成拉取；旧示例里的 `INGEST_MODE=pull` 只告警。
 - 本地排行无需改动：排行按 `api_group_key` 关联 `cpa_api_keys`，推送 Key 仍以 `is_deleted = false` 出现在榜单中。
+
+## 2026-10-27 推送凭据展示兼容
+
+- 推送凭据名称使用独立的 `push_usage_identities` 展示目录和新增 `20261027_push_usage_identities` 迁移，不加入本机 `usage_identities`，不接入本机凭据启停、删除或全量同步。
+- 名称按 CPA 来源与凭据编号隔离，关联历史请求事件；不改变 `api_group_key`、Token、费用、去重或排行聚合口径。
+- 请求事件的来源筛选和导出支持推送 CPA；本地排行页、手工别名来源和头像字段保持原有接入。
+
+## 2026-10-28 推送凭据名称时间排序修复
+
+- 推送展示目录的 `observed_at` 使用固定九位小数的 UTC 格式，保证 UTC 小数精度差异和夏令时回拨不会让旧补传覆盖新名称。
+- 新增 `20261028_push_usage_identity_observed_at` 迁移追加在展示目录迁移之后，只规范已有目录的时间格式，保留时间含义、名称和来源；不修改历史迁移、用量事件、排行快照、手工别名或头像。
+- 新增 `20261028_usage_event_source_id_index` 迁移追加在其后：给 `usage_events` 补 `(source_id, timestamp, id)` 部分索引，只覆盖推送行，支撑按 CPA 筛选；不改数据，排行聚合不受影响。

@@ -15,8 +15,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
 	"cpa-usage-keeper/internal/timeutil"
@@ -147,6 +150,7 @@ func (r *Receiver) accept(ctx context.Context, sourceKey int64, sourceID string,
 	ack := Ack{SchemaVersion: 1, AcceptedIDs: make([]string, 0, len(events))}
 	recordUse := sourceKey > 0 && r.sources.shouldRecordUse(sourceKey, now)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		identities := make(map[string]entities.PushUsageIdentity)
 		for _, e := range events {
 			hash := sha256.Sum256(e.Usage)
 			receipt := entities.PushReceipt{SourceID: sourceID, DeliveryEventID: e.ID, PayloadHash: hex.EncodeToString(hash[:]), ReceivedAt: timeutil.NormalizeStorageTime(now)}
@@ -179,7 +183,35 @@ func (r *Receiver) accept(ctx context.Context, sourceKey int64, sourceID string,
 			if err := repository.RecordPushedCPAAPIKey(tx, payload.APIKey, now); err != nil {
 				return err
 			}
+			if payload.Identity != nil {
+				identity := entities.PushUsageIdentity{
+					AuthIndex: helper.ScopedPushAuthIndex(sourceID, strings.TrimSpace(payload.AuthIndex)), SourceID: sourceID,
+					DisplayName: helper.SanitizeDisplayText(payload.Identity.DisplayName), ProviderType: helper.SanitizeDisplayText(payload.Identity.ProviderType),
+					ObservedAt: timeutil.NormalizeStorageTime(payload.Timestamp),
+				}
+				// 清理后为空的名称不登记，用量照常接收，展示退回 CPA 名称。
+				previous, seen := identities[identity.AuthIndex]
+				if identity.DisplayName != "" && (!seen || !identity.ObservedAt.Before(previous.ObservedAt)) {
+					identities[identity.AuthIndex] = identity
+				}
+			}
 			ack.AcceptedIDs = append(ack.AcceptedIDs, e.ID)
+		}
+		if len(identities) > 0 {
+			rows := make([]entities.PushUsageIdentity, 0, len(identities))
+			for _, identity := range identities {
+				rows = append(rows, identity)
+			}
+			// One metadata upsert per identity per batch. Older spool deliveries
+			// cannot overwrite a display name observed in a newer event.
+			// ObservedAt uses fixed-width UTC storage for this TEXT comparison.
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "auth_index"}},
+				DoUpdates: clause.AssignmentColumns([]string{"display_name", "provider_type", "observed_at"}),
+				Where:     clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "excluded.observed_at >= push_usage_identities.observed_at"}}},
+			}).Create(&rows).Error; err != nil {
+				return err
+			}
 		}
 		// 最近上传时间随同一事务提交：不在 ACK 之后另写，进程重启或请求取消都不会丢失。
 		if recordUse {
@@ -205,6 +237,14 @@ func validateUsage(raw []byte) error {
 	}
 	if p.LatencyMS < 0 || (p.TTFTMS != nil && *p.TTFTMS < 0) {
 		return fmt.Errorf("invalid latency")
+	}
+	if p.Identity != nil {
+		validText := func(value string, limit int) bool {
+			return utf8.ValidString(value) && utf8.RuneCountInString(value) <= limit && !strings.ContainsFunc(value, unicode.IsControl)
+		}
+		if strings.TrimSpace(p.AuthIndex) == "" || len(p.AuthIndex) > 128 || strings.TrimSpace(p.Identity.DisplayName) == "" || !validText(p.Identity.DisplayName, 256) || !validText(p.Identity.ProviderType, 64) {
+			return fmt.Errorf("invalid identity display metadata")
+		}
 	}
 	for _, n := range []int64{p.Tokens.Input, p.Tokens.Output, p.Tokens.Reasoning, p.Tokens.Cached, p.Tokens.CacheRead, p.Tokens.CacheCreation, p.Tokens.Total} {
 		if n < 0 {

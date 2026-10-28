@@ -5,11 +5,35 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
 type usageIdentityResolver struct {
 	credentialsByIdentity map[string]entities.UsageIdentity
 	providersByIdentity   map[string]entities.UsageIdentity
+	pushSourceNames       map[string]string
+	pushedByIdentity      map[string]entities.PushUsageIdentity
+}
+
+// resolveEvent keeps remote identities outside local credential matching and management.
+func (r usageIdentityResolver) resolveEvent(row servicedto.UsageEventRecord) (resolvedUsageIdentity, bool) {
+	if row.SourceID == "" {
+		return r.resolveByAuthIndex(row.AuthIndex)
+	}
+	result := resolvedUsageIdentity{DisplayName: strings.TrimSpace(row.Provider), Type: strings.TrimSpace(row.Provider)}
+	if item, ok := r.pushedByIdentity[row.AuthIndex]; ok && item.SourceID == row.SourceID {
+		result.DisplayName = item.DisplayName
+		if item.ProviderType != "" {
+			result.Type = item.ProviderType
+		}
+	}
+	if result.DisplayName == "" {
+		result.DisplayName = r.pushSourceNames[row.SourceID]
+	}
+	if result.DisplayName == "" {
+		result.DisplayName = row.SourceID
+	}
+	return result, true
 }
 
 func newUsageIdentityResolver(identities []entities.UsageIdentity) usageIdentityResolver {

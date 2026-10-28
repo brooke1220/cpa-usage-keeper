@@ -17,7 +17,7 @@ import (
 )
 
 // usageEventProjectionColumns 限制 usage_events 查询列，避免 Overview 和列表页把 RawJSON 等大字段读入内存。
-const usageEventProjectionColumns = "id, api_group_key, provider, auth_type, request_id, client_ip, x_forwarded_for, user_agent, model, model_alias, response_model, reasoning_effort, service_tier, effective_service_tier, response_service_tier, executor_type, endpoint, timestamp, source, auth_index, failed, status_code, stream, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, cost_usd, cost_available"
+const usageEventProjectionColumns = "id, api_group_key, provider, auth_type, request_id, client_ip, x_forwarded_for, user_agent, model, model_alias, response_model, reasoning_effort, service_tier, effective_service_tier, response_service_tier, executor_type, endpoint, timestamp, source, source_id, auth_index, failed, status_code, stream, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, cost_usd, cost_available"
 
 // usageOverviewBoundaryEventProjectionColumns 只包含非 Custom Overview 边界卡片计算需要的字段。
 const usageOverviewBoundaryEventProjectionColumns = "id, api_group_key, model, model_alias, timestamp, failed, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, cost_usd, cost_available"
@@ -46,6 +46,7 @@ type usageEventProjection struct {
 	Endpoint             string
 	Timestamp            time.Time
 	Source               string
+	SourceID             string
 	AuthIndex            string
 	Failed               bool
 	StatusCode           *int
@@ -272,6 +273,7 @@ func usageEventProjectionToRecord(event usageEventProjection) dto.UsageEventReco
 		RequestID:            strings.TrimSpace(event.RequestID),
 		Provider:             strings.TrimSpace(event.Provider),
 		Source:               strings.TrimSpace(event.Source),
+		SourceID:             strings.TrimSpace(event.SourceID),
 		AuthIndex:            strings.TrimSpace(event.AuthIndex),
 		Failed:               event.Failed,
 		StatusCode:           event.StatusCode,
@@ -367,6 +369,10 @@ func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm
 	if authIndex := strings.TrimSpace(filter.AuthIndex); authIndex != "" {
 		// Source 下拉在 API 层已转换成 auth_index，仓储层只保留真实查询维度。
 		query = query.Where("auth_index = ?", authIndex)
+	}
+	if sourceID := strings.TrimSpace(filter.SourceID); sourceID != "" {
+		// 字面量条件让 SQLite 能用只含推送行的部分索引；绑定参数无法证明它非空。
+		query = query.Where("source_id = ? AND source_id <> ''", sourceID)
 	}
 	if authType := strings.TrimSpace(filter.AuthType); authType != "" {
 		query = query.Where("auth_type = ?", authType)

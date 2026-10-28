@@ -377,6 +377,25 @@
                 "type": "boolean"
               }
             }
+          },
+          "identity": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Optional display metadata resolved by auth_index through the host. Requires a nonempty auth_index. Never include Account, legacy Source, keys, tokens or credential JSON. Control characters are rejected; Keeper strips invisible formatting characters and stores line/paragraph separators as spaces. Upgrade Keeper before sending this field.",
+            "required": [
+              "display_name"
+            ],
+            "properties": {
+              "display_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "provider_type": {
+                "type": "string",
+                "maxLength": 64
+              }
+            }
           }
         }
       },

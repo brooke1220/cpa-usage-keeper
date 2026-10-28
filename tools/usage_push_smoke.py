@@ -106,11 +106,38 @@ def main():
         Shutdown = ctypes.CFUNCTYPE(None)
         class API(ctypes.Structure):
             _fields_ = [('abi_version', ctypes.c_uint32), ('call', Call), ('free_buffer', Free), ('shutdown', Shutdown)]
+        HostCall = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t, ctypes.POINTER(Buffer))
+        class HostAPI(ctypes.Structure):
+            _fields_ = [('abi_version', ctypes.c_uint32), ('host_ctx', ctypes.c_void_p), ('call', HostCall), ('free_buffer', Free)]
+        host_buffers = {}
+        identity_queries = []
+
+        @HostCall
+        def host_call(_context, method, raw, length, response):
+            result = {}
+            if method == b'host.auth.get_runtime':
+                auth_index = json.loads(ctypes.string_at(raw, length))['auth_index']
+                identity_queries.append(auth_index)
+                result = {'auth': {'auth_index': auth_index, 'label': 'Native Channel', 'name': 'native-credential.json',
+                                   'provider': 'codex', 'account': 'excluded-synthetic-account-secret',
+                                   'source': 'excluded-synthetic-source-secret'}}
+            payload = json.dumps({'ok': True, 'result': result}).encode()
+            storage = ctypes.create_string_buffer(payload)
+            address = ctypes.addressof(storage)
+            host_buffers[address] = storage
+            response.contents.ptr, response.contents.len = address, len(payload)
+            return 0
+
+        @Free
+        def host_free(address, _length):
+            host_buffers.pop(address, None)
+
+        host_api = HostAPI(1, None, host_call, host_free)
         library = ctypes.CDLL(args.plugin)
         library.cliproxy_plugin_init.argtypes = [ctypes.c_void_p, ctypes.POINTER(API)]
         library.cliproxy_plugin_init.restype = ctypes.c_int
         api = API()
-        if library.cliproxy_plugin_init(None, ctypes.byref(api)) != 0:
+        if library.cliproxy_plugin_init(ctypes.byref(host_api), ctypes.byref(api)) != 0:
             raise RuntimeError('native plugin initialization failed')
 
         def plugin_call(method, value):
@@ -141,6 +168,7 @@ def main():
                         'RequestLogID': 'same-parent-request', 'APIKey': 'sk-smoke-shared', 'Provider': 'codex', 'Model': 'smoke-model',
                         'ExecutorType': 'CodexExecutor', 'AuthType': 'api_key', 'AuthIndex': 'same-credential', 'Source': 'upstream-account',
                         'RequestedAt': timestamp, 'Generate': True, 'Stream': True, 'Latency': 1000000000, 'TTFT': 200000000,
+                        'ReasoningEffort': 'xhigh', 'ServiceTier': 'auto', 'EffectiveServiceTier': 'priority', 'ResponseServiceTier': 'default',
                         'Failure': {'StatusCode': 200, 'Body': 'excluded-synthetic-failure-body'},
                         'ResponseHeaders': {'Authorization': ['excluded-synthetic-upstream-secret']},
                         'Detail': {'InputTokens': 100, 'OutputTokens': 40, 'ReasoningTokens': 10, 'CachedTokens': 20, 'CacheReadTokens': 20, 'TotalTokens': 140}})
@@ -173,6 +201,12 @@ def main():
             register('cpa-smoke-01')
             wait_count(6)
             api.shutdown()
+            native_rows = request('/api/v1/usage/events?range=today')['events']
+            assert len(native_rows) == 6 and len(identity_queries) == 2, (len(native_rows), len(identity_queries))
+            for row in native_rows:
+                assert row['source'] == 'Native Channel' and row['source_name'] in ('cpa-smoke-00', 'cpa-smoke-01'), row
+                assert not row.get('isDelete') and row['source_type'] == 'codex', row
+                assert row['reasoning_effort'] == 'xhigh' and row['effective_service_tier'] == 'priority', row
             for i in range(2):
                 with sqlite3.connect(root / f'cpa-smoke-{i:02}' / 'outbox.db') as db:
                     if db.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] != 0:
@@ -206,6 +240,7 @@ def main():
                                      'request_id': 'same-parent-request', 'execution_id': f'load-exec-{source_index}-{i}', 'tokens': token_stats,
                                      'generate': True, 'stream': True, 'failed': False, 'latency_ms': 1000, 'ttft_ms': 200,
                                      'fail': {'status_code': 200}, 'accounting_version': 2, 'token_breakdown': breakdown}
+                            usage['identity'] = {'display_name': f'Load Channel {source_index}', 'provider_type': 'codex'}
                             events.append({'delivery_event_id': f'load-{source_index}-{i}', 'usage': usage})
                         body = json.dumps({'schema_version': 1, 'events': events}, separators=(',', ':'))
                         copies = 2 if start % 1000 == 0 else 1
@@ -269,7 +304,7 @@ def main():
             stop_keeper()
             usage = resource.getrusage(resource.RUSAGE_CHILDREN)
             keeper_rss = usage.ru_maxrss if sys.platform == 'darwin' else usage.ru_maxrss * 1024
-            report = {'overview_verified': True, 'api_key_views_verified': len(key_totals), 'peak_keeper_rss_bytes': keeper_rss, 'keeper_child_user_cpu_seconds': usage.ru_utime, 'keeper_child_system_cpu_seconds': usage.ru_stime, 'native_plugin_events': 6, 'replayed_events': args.events, 'sources': 10,
+            report = {'native_identity_lookup_verified': True, 'identity_lookup_calls': len(identity_queries), 'overview_verified': True, 'api_key_views_verified': len(key_totals), 'peak_keeper_rss_bytes': keeper_rss, 'keeper_child_user_cpu_seconds': usage.ru_utime, 'keeper_child_system_cpu_seconds': usage.ru_stime, 'native_plugin_events': 6, 'replayed_events': args.events, 'sources': 10,
                       'duplicate_batches_retried': duplicates, 'stored_events': count, 'durable_receipts': receipts,
                       'tokens': total, 'cost_usd': cost, 'keys': keys, 'source_scoped_credentials': scoped,
                       'quarantined': failed, 'native_payload_leaks': leaked, 'accept_seconds': accepted_seconds,

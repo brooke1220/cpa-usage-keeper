@@ -15,6 +15,7 @@ func TestAllIncludesCoreModels(t *testing.T) {
 	items := All()
 	expected := []any{
 		&PushSource{},
+		&PushUsageIdentity{},
 		&PushReceipt{},
 		&UsageEvent{},
 		&UsageEventArchive{},
