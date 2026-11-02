@@ -73,7 +73,7 @@ func TestPushOnlyStartupWithoutCPA(t *testing.T) {
 	if app.RedisIngest != nil || app.CPAErrors != nil || app.MetadataSync != nil || app.QuotaService != nil || app.QuotaAutoRefresh != nil {
 		t.Fatal("push-only startup constructed an outbound CPA task")
 	}
-	if app.RedisProcess == nil || app.UsageAggregation == nil || app.LocalRanking == nil || app.Maintenance == nil {
+	if app.RedisProcess == nil || app.UsageAggregation == nil || app.LocalRanking == nil || app.PluginAPIKeys == nil || app.Maintenance == nil {
 		t.Fatal("push-only startup lost a local background task")
 	}
 	w := serveApp(app, "GET", "/api/v1/status", "", nil)

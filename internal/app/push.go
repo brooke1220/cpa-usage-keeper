@@ -52,7 +52,8 @@ func buildPushReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Clos
 	catalog := pricing.NewCatalog(snapshot)
 	gate := service.NewCostReadGate()
 	aggregation := poller.NewUsageAggregationRunner(db)
-	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{PricingCatalog: catalog, RecentUsageEvents: recent, UsageAggregationNotifier: aggregation, UsageRawRetentionDays: cfg.UsageRawRetentionDays})
+	pluginAPIKeys := poller.NewPluginAPIKeyRunner(db)
+	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{PricingCatalog: catalog, RecentUsageEvents: recent, UsageAggregationNotifier: aggregation, UsageRawRetentionDays: cfg.UsageRawRetentionDays, PluginAPIKeys: pluginAPIKeys})
 	process := poller.NewRedisProcessRunner(syncService)
 	status := poller.NewRedisPoller(nil, process)
 	workClock, err := workhours.Load(ctx, db)
@@ -99,7 +100,7 @@ func buildPushReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Clos
 	}
 	keys := service.NewCPAAPIKeyService(db)
 	usage := service.NewUsageServiceWithOptions(db, service.UsageServiceOptions{RecentUsage: recent, PricingCatalog: catalog})
-	ready := &App{Config: &cfg, DB: db, ReadDB: readDB, Poller: status, RedisProcess: process, UsageAggregation: aggregation, LocalRanking: rankingRunner, Maintenance: NewStorageCleanupRunner(syncService), BackupMaintenance: backups, RecentUsageCache: recent, CostReadGate: gate, PricingCatalog: catalog, PricingService: prices, LogCloser: logCloser}
+	ready := &App{Config: &cfg, DB: db, ReadDB: readDB, Poller: status, RedisProcess: process, UsageAggregation: aggregation, LocalRanking: rankingRunner, PluginAPIKeys: pluginAPIKeys, Maintenance: NewStorageCleanupRunner(syncService), BackupMaintenance: backups, RecentUsageCache: recent, CostReadGate: gate, PricingCatalog: catalog, PricingService: prices, LogCloser: logCloser}
 	ready.Router = api.NewRouter(webui.Static, status, usage, prices, authConfig, api.NewAuthHandler(authConfig, sessions), cfg.AppBasePath, api.OptionalProviders{CostReadGate: gate, CPAAPIKeys: keys, APIKeyTimeUsage: keyTime, LocalRanking: localRanking, WorkHours: workhours.NewService(db, workClock), Ingest: receiver, Status: api.StatusRouteConfig{IngestMode: cfg.IngestMode(), Ingest: receiver}})
 	prepared = true
 	return ready, nil

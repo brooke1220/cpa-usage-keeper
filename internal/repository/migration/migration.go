@@ -111,6 +111,7 @@ const (
 	migrationRecoverExecutionUsageEvents       = "20261018_recover_execution_usage_events"
 	migrationRestoreLocalRanking               = "20261021_restore_local_ranking"
 	migrationAddUsageEventEffectiveServiceTier = "20261023_usage_event_effective_service_tier"
+	migrationAddPluginAPIKeySources            = "20261028_plugin_api_key_sources"
 )
 
 type schemaMigration struct {
@@ -340,6 +341,7 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationPushUsageIdentities, run: pushUsageIdentitiesMigration},
 		{version: migrationPushUsageIdentityObservedAt, run: pushUsageIdentityObservedAtMigration},
 		{version: migrationUsageEventSourceIDIndex, run: usageEventSourceIDIndexMigration},
+		{version: migrationAddPluginAPIKeySources, run: addPluginAPIKeySourcesMigration},
 	}
 }
 

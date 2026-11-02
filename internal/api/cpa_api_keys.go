@@ -20,11 +20,13 @@ const maxCPAAPIKeyAliasLength = 128
 const maxCPAAPIKeyAliasImportItems = 1000
 
 type cpaAPIKeyResponse struct {
-	ID           string  `json:"id"`
-	KeyAlias     string  `json:"keyAlias"`
-	DisplayKey   string  `json:"displayKey"`
-	Label        string  `json:"label"`
-	LastSyncedAt *string `json:"lastSyncedAt"`
+	ID             string  `json:"id"`
+	KeyAlias       string  `json:"keyAlias"`
+	DisplayKey     string  `json:"displayKey"`
+	Label          string  `json:"label"`
+	LastSyncedAt   *string `json:"lastSyncedAt"`
+	SourceType     string  `json:"sourceType"`
+	AccessProvider string  `json:"accessProvider"`
 }
 
 type cpaAPIKeyListResponse struct {
@@ -32,12 +34,14 @@ type cpaAPIKeyListResponse struct {
 }
 
 type cpaAPIKeySettingsResponse struct {
-	ID           string  `json:"id"`
-	APIKey       string  `json:"apiKey"`
-	KeyAlias     string  `json:"keyAlias"`
-	DisplayKey   string  `json:"displayKey"`
-	Label        string  `json:"label"`
-	LastSyncedAt *string `json:"lastSyncedAt"`
+	ID             string  `json:"id"`
+	APIKey         string  `json:"apiKey,omitempty"`
+	KeyAlias       string  `json:"keyAlias"`
+	DisplayKey     string  `json:"displayKey"`
+	Label          string  `json:"label"`
+	LastSyncedAt   *string `json:"lastSyncedAt"`
+	SourceType     string  `json:"sourceType"`
+	AccessProvider string  `json:"accessProvider"`
 }
 
 type cpaAPIKeySettingsListResponse struct {
@@ -57,7 +61,7 @@ type updateCPAAPIKeyAliasRequest struct {
 	KeyAlias string `json:"keyAlias"`
 }
 
-func registerCPAAPIKeyRoutes(router gin.IRoutes, provider service.CPAAPIKeyProvider) {
+func registerCPAAPIKeyRoutes(router gin.IRoutes, provider service.CPAAPIKeyProvider, usageProvider service.UsageProvider) {
 	router.GET("/usage/api-keys", func(c *gin.Context) {
 		rows, err := listCPAAPIKeyRows(c, provider)
 		if err != nil {
@@ -75,6 +79,11 @@ func registerCPAAPIKeyRoutes(router gin.IRoutes, provider service.CPAAPIKeyProvi
 	})
 
 	router.GET("/usage/api-keys/options", func(c *gin.Context) {
+		setNoStoreHeaders(c)
+		if scope := strings.TrimSpace(c.Query("scope")); scope != "" {
+			listScopedCPAAPIKeyOptions(c, usageProvider, scope)
+			return
+		}
 		rows, err := listCPAAPIKeyOptionRows(c, provider)
 		if err != nil {
 			return
@@ -242,11 +251,13 @@ func toCPAAPIKeyResponse(row entities.CPAAPIKey) cpaAPIKeyResponse {
 		lastSyncedAt = &value
 	}
 	return cpaAPIKeyResponse{
-		ID:           strconv.FormatInt(row.ID, 10),
-		KeyAlias:     row.KeyAlias,
-		DisplayKey:   helper.CPAAPIKeyMaskedDisplayKey(row),
-		Label:        label,
-		LastSyncedAt: lastSyncedAt,
+		ID:             strconv.FormatInt(row.ID, 10),
+		KeyAlias:       row.KeyAlias,
+		DisplayKey:     helper.CPAAPIKeyMaskedDisplayKey(row),
+		Label:          label,
+		LastSyncedAt:   lastSyncedAt,
+		SourceType:     cpaAPIKeySourceType(row),
+		AccessProvider: row.AccessProvider,
 	}
 }
 
@@ -257,14 +268,27 @@ func toCPAAPIKeySettingsResponse(row entities.CPAAPIKey) cpaAPIKeySettingsRespon
 		value := timeutil.FormatStorageTime(*row.LastSyncedAt)
 		lastSyncedAt = &value
 	}
-	return cpaAPIKeySettingsResponse{
-		ID:           strconv.FormatInt(row.ID, 10),
-		APIKey:       row.APIKey,
-		KeyAlias:     row.KeyAlias,
-		DisplayKey:   helper.CPAAPIKeyMaskedDisplayKey(row),
-		Label:        label,
-		LastSyncedAt: lastSyncedAt,
+	apiKey := row.APIKey
+	if row.SourceType == entities.CPAAPIKeySourcePlugin {
+		apiKey = ""
 	}
+	return cpaAPIKeySettingsResponse{
+		ID:             strconv.FormatInt(row.ID, 10),
+		APIKey:         apiKey,
+		KeyAlias:       row.KeyAlias,
+		DisplayKey:     helper.CPAAPIKeyMaskedDisplayKey(row),
+		Label:          label,
+		LastSyncedAt:   lastSyncedAt,
+		SourceType:     cpaAPIKeySourceType(row),
+		AccessProvider: row.AccessProvider,
+	}
+}
+
+func cpaAPIKeySourceType(row entities.CPAAPIKey) string {
+	if row.SourceType == entities.CPAAPIKeySourcePlugin {
+		return entities.CPAAPIKeySourcePlugin
+	}
+	return entities.CPAAPIKeySourceNative
 }
 
 func toCPAAPIKeyOption(row entities.CPAAPIKey) cpaAPIKeyOption {

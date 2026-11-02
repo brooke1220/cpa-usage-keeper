@@ -38,6 +38,7 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 	}
 	// 先在独立 reader 上比较完整 key 集合，只有变化才进入 writer 事务。
 	if err := db.Clauses(dbresolver.Read).Model(&entities.CPAAPIKey{}).
+		Where("source_type = ?", entities.CPAAPIKeySourceNative).
 		Select("id, api_key, display_key, pull_seen, push_seen, is_deleted").Find(&existingRows).Error; err != nil {
 		return err
 	}
@@ -75,6 +76,7 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 		}
 		toCreate = append(toCreate, entities.CPAAPIKey{
 			APIKey:       key,
+			SourceType:   entities.CPAAPIKeySourceNative,
 			DisplayKey:   helper.RedactSensitiveValue(key),
 			PullSeen:     true,
 			IsDeleted:    false,
@@ -102,7 +104,7 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for _, change := range toUpdate {
-			if err := tx.Model(&entities.CPAAPIKey{}).Where("id = ?", change.id).Updates(change.fields).Error; err != nil {
+			if err := tx.Model(&entities.CPAAPIKey{}).Where("id = ? AND source_type = ?", change.id, entities.CPAAPIKeySourceNative).Updates(change.fields).Error; err != nil {
 				return err
 			}
 		}
@@ -111,12 +113,13 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "api_key"}},
 				DoUpdates: clause.Assignments(map[string]any{"pull_seen": true, "is_deleted": false, "last_synced_at": &syncedAt, "updated_at": syncedAt}),
-			}).Create(&toCreate).Error; err != nil {
+				Where:     clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Table: "cpa_api_keys", Name: "source_type"}, Value: entities.CPAAPIKeySourceNative}}},
+			}).CreateInBatches(&toCreate, insertBatchSize(entities.CPAAPIKey{})).Error; err != nil {
 				return err
 			}
 		}
 		if len(unpulledIDs) > 0 {
-			if err := tx.Model(&entities.CPAAPIKey{}).Where("id IN ?", unpulledIDs).Updates(map[string]any{"pull_seen": false, "updated_at": syncedAt}).Error; err != nil {
+			if err := tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND source_type = ?", unpulledIDs, entities.CPAAPIKeySourceNative).Updates(map[string]any{"pull_seen": false, "updated_at": syncedAt}).Error; err != nil {
 				return err
 			}
 		}
@@ -124,10 +127,10 @@ func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
 			return nil
 		}
 		// 候选来自 reader 快照；写入前再确认 push_seen，期间刚被推送登记的 Key 只撤拉取标记，不删除。
-		if err := tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND push_seen = ?", staleIDs, true).Updates(map[string]any{"pull_seen": false, "updated_at": syncedAt}).Error; err != nil {
+		if err := tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND push_seen = ? AND source_type = ?", staleIDs, true, entities.CPAAPIKeySourceNative).Updates(map[string]any{"pull_seen": false, "updated_at": syncedAt}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND push_seen = ?", staleIDs, false).Updates(map[string]any{"pull_seen": false, "is_deleted": true, "updated_at": syncedAt}).Error
+		return tx.Model(&entities.CPAAPIKey{}).Where("id IN ? AND push_seen = ? AND source_type = ?", staleIDs, false, entities.CPAAPIKeySourceNative).Updates(map[string]any{"pull_seen": false, "is_deleted": true, "updated_at": syncedAt}).Error
 	})
 }
 
@@ -143,7 +146,8 @@ func RecordPushedCPAAPIKey(tx *gorm.DB, key string, seenAt time.Time) error {
 	// 时间按 storageTime 序列化格式写入，与结构体读写保持一致。
 	return tx.Exec(`INSERT INTO cpa_api_keys (api_key, display_key, key_alias, key_alias_source, pull_seen, push_seen, is_deleted, last_synced_at, created_at, updated_at)
 VALUES (?, ?, '', '', 0, 1, 0, ?, ?, ?)
-ON CONFLICT(api_key) DO UPDATE SET push_seen = 1, is_deleted = 0, last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at`,
+ON CONFLICT(api_key) DO UPDATE SET push_seen = 1, is_deleted = 0, last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at
+WHERE cpa_api_keys.source_type = 'native'`,
 		key, helper.RedactSensitiveValue(key), at, at, at).Error
 }
 
@@ -161,7 +165,8 @@ func FindActiveCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) 
 
 func FindActiveCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey, error) {
 	var row entities.CPAAPIKey
-	err := db.Where("api_key = ? AND is_deleted = ?", apiKey, false).First(&row).Error
+	// 该入口用于 API key 登录，插件的统计关联标识不能作为原生凭证。
+	err := db.Where("api_key = ? AND is_deleted = ? AND source_type = ?", apiKey, false, entities.CPAAPIKeySourceNative).First(&row).Error
 	return row, err
 }
 
@@ -170,13 +175,13 @@ func FindActiveCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey,
 
 func FindLoginCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) {
 	var row entities.CPAAPIKey
-	err := db.Where("id = ? AND is_deleted = ? AND pull_seen = ?", id, false, true).First(&row).Error
+	err := db.Where("id = ? AND is_deleted = ? AND pull_seen = ? AND source_type = ?", id, false, true, entities.CPAAPIKeySourceNative).First(&row).Error
 	return row, err
 }
 
 func FindLoginCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey, error) {
 	var row entities.CPAAPIKey
-	err := db.Where("api_key = ? AND is_deleted = ? AND pull_seen = ?", apiKey, false, true).First(&row).Error
+	err := db.Where("api_key = ? AND is_deleted = ? AND pull_seen = ? AND source_type = ?", apiKey, false, true, entities.CPAAPIKeySourceNative).First(&row).Error
 	return row, err
 }
 

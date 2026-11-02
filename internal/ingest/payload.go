@@ -20,6 +20,8 @@ type tokenStats struct {
 type usagePayload struct {
 	Timestamp            time.Time              `json:"timestamp"`
 	APIKey               string                 `json:"api_key"`
+	IsNativeKey          *bool                  `json:"is_native_key,omitempty"`
+	AccessProvider       *string                `json:"access_provider,omitempty"`
 	Provider             string                 `json:"provider"`
 	Model                string                 `json:"model"`
 	Alias                string                 `json:"alias,omitempty"`

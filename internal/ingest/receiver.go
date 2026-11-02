@@ -180,8 +180,12 @@ func (r *Receiver) accept(ctx context.Context, sourceKey int64, sourceID string,
 			if err := json.Unmarshal(e.Usage, &payload); err != nil {
 				return err
 			}
-			if err := repository.RecordPushedCPAAPIKey(tx, payload.APIKey, now); err != nil {
-				return err
+			// 插件 principal 在用量提交后由统一登记任务处理，不能登记为可展示原文的原生 Key。
+			pluginIdentity := payload.IsNativeKey != nil && !*payload.IsNativeKey && payload.AccessProvider != nil && helper.IsPluginAccessProvider(*payload.AccessProvider)
+			if !pluginIdentity {
+				if err := repository.RecordPushedCPAAPIKey(tx, payload.APIKey, now); err != nil {
+					return err
+				}
 			}
 			if payload.Identity != nil {
 				identity := entities.PushUsageIdentity{

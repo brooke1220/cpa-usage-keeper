@@ -17,6 +17,9 @@ func TestInitializeInstallsLocalRankingRunnerOnRunningApp(t *testing.T) {
 	if application.LocalRanking == nil {
 		t.Fatal("v2 installReadyApp discarded the constructed local ranking runner; background aggregation will never start")
 	}
+	if application.PluginAPIKeys == nil {
+		t.Fatal("v2 installReadyApp discarded the plugin API key registration runner")
+	}
 }
 
 func TestProductionStartupMigratesAndAggregatesExistingLocalRankingUsage(t *testing.T) {

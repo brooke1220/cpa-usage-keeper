@@ -8,9 +8,10 @@ import { UsageComparisonCharts } from '@/components/usage/UsageComparisonCharts'
 import type { ModelSpeedRefreshSignal } from '@/components/usage/model-speed/modelSpeedAnimation';
 import { useState, useMemo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentity, fetchVersion, importCpaApiKeyAliases, isCostsBusy, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentity, fetchVersion, importCpaApiKeyAliases, isCostsBusy, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat, type CpaApiKeyOptionsRequest } from '@/lib/api';
 import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyDisplayItem, CpaApiKeyOption, CpaApiKeySettingsItem, IngestMode, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { getUsageTabPath, handleUsageTabKeyActivation, normalizeUsageTabValue, resolveInitialUsageTab, shouldHandleUsageNavigation, USAGE_TAB_OPTIONS, type UsageTab } from '@/lib/usageNavigation';
+import { useScopedAPIKeyOptions } from '@/components/usage/hooks/useScopedAPIKeyOptions';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -768,6 +769,11 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
   const [realtimeWindow, setRealtimeWindow] = useState<OverviewRealtimeWindow>(loadRealtimeWindow);
   const [selectedApiKeyId, setSelectedApiKeyId] = useState(loadSelectedApiKeyId);
   const [apiKeyOptions, setApiKeyOptions] = useState<CpaApiKeyOption[]>([]);
+  const discoveredApiKeys = useRef(new Map<string, CpaApiKeyOption>());
+  const rememberScopedApiKeys = useCallback((options: CpaApiKeyOption[]) => {
+    for (const option of options) discoveredApiKeys.current.set(option.id, option);
+    setApiKeyOptions((current) => Array.from(new Map([...current, ...options].map((option) => [option.id, option])).values()));
+  }, []);
   const [apiKeyOptionsLoaded, setApiKeyOptionsLoaded] = useState(false);
   const [apiKeyOptionsResolved, setApiKeyOptionsResolved] = useState(false);
   const apiKeyFilterRequestState = resolveApiKeyFilterRequestState(
@@ -810,6 +816,15 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
     setTimeRangeState(nextState);
     return true;
   }, [rangeRecoveryTimeZone, timeRangeState]);
+  const apiKeyOptionsRequest = useMemo<CpaApiKeyOptionsRequest | null>(() => {
+    if (activeTab === 'realtime') return { scope: 'realtime', window: realtimeWindow };
+    if (!usageRangeQuery.valid) return null;
+    if (activeTab === 'events') return { scope: 'request-events', range: usageRangeQuery };
+    if (activeTab === 'overview' || activeTab === 'analysis') return { scope: activeTab, range: usageRangeQuery };
+    return null;
+  }, [activeTab, realtimeWindow, usageRangeQuery]);
+  const scopedApiKeys = useScopedAPIKeyOptions(apiKeyOptionsRequest, rememberScopedApiKeys, onAuthRequired, recoverRangeBoundsConflict);
+  const { refresh: refreshScopedApiKeys, invalidate: invalidateScopedApiKeys } = scopedApiKeys;
 
   const {
     usage,
@@ -1025,10 +1040,12 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
   const apiKeySelectOptions = useMemo(
     () => [
       { value: '', label: t('usage_stats.api_key_filter_all') },
-      ...apiKeyOptions.map((option) => ({ value: option.id, label: option.label })),
+      ...scopedApiKeys.options.map((option) => ({ value: option.id, label: option.label })),
+      ...(scopedApiKeys.status === 'ready' ? [] : [{ value: '__status__', disabled: true, label: scopedApiKeys.status === 'error' ? t('usage_stats.api_key_options_failed') : t('common.loading') }]),
     ],
-    [apiKeyOptions, t],
+    [scopedApiKeys.options, scopedApiKeys.status, t],
   );
+  const selectedApiKeyOption = { value: selectedApiKeyId, label: apiKeyOptions.find((option) => option.id === selectedApiKeyId)?.label ?? (selectedApiKeyId || t('usage_stats.api_key_filter_all')) };
   const credentialTypeCountsForProviderFilter = useMemo(() => {
     if (credentialSectionVisibility.showCredentials) return credentialsData.credentialTypeCounts;
     if (credentialSectionVisibility.showAiProvider) return credentialsData.aiProviderTypeCounts;
@@ -1053,6 +1070,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
   const cpaManagementURL = useMemo(() => (pushMode ? '' : getBackToCPALinkURL(status)), [pushMode, status]);
 
   const loadApiKeyOptions = useCallback(async () => {
+    discoveredApiKeys.current.clear();
     apiKeyOptionsRequestControllerRef.current?.abort();
     const controller = new AbortController();
     apiKeyOptionsRequestControllerRef.current = controller;
@@ -1063,7 +1081,8 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
       if (apiKeyOptionsRequestControllerRef.current !== controller) {
         return;
       }
-      setApiKeyOptions(response.options ?? []);
+      // 初始名册请求期间发现的新 Key 不被较早的响应覆盖。
+      setApiKeyOptions(Array.from(new Map([...(response.options ?? []), ...discoveredApiKeys.current.values()].map((option) => [option.id, option])).values()));
       setApiKeyOptionsLoaded(true);
       setApiKeyOptionsResolved(true);
     } catch (error) {
@@ -1162,10 +1181,11 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
-        return;
+        throw error;
       }
       setApiKeySettingsError(error instanceof Error ? error.message : 'Failed to update CPA API key alias');
       showTopNotice('error', t('usage_stats.api_key_settings_alias_save_failed'));
+      throw error;
     } finally {
       setApiKeySettingsSavingId(null);
     }
@@ -1813,7 +1833,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
     });
   }, [onAuthRequired, requestLogAccessEnabled, showTopNotice, t]);
 
-  const refreshActiveTab = useCallback(async () => {
+  const refreshActiveTabData = useCallback(async () => {
     if (!apiKeyFilterReady && shouldShowApiKeyFilter(activeTab)) return;
     if (activeTab === 'realtime') {
       await loadRealtime((response) => {
@@ -1845,7 +1865,13 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
     await Promise.all([loadUsage(markOverviewLoaded), loadActivity(), loadComparisons({ onLoaded: markComparisonsLoaded })]);
   }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadComparisons, loadEventFilterOptions, loadEvents, loadRealtime, loadUsage, refreshCredentialDetail, refreshCredentials, markOverviewLoaded, markComparisonsLoaded]);
 
+  const refreshActiveTab = useCallback(async () => {
+    if (!apiKeyFilterReady && shouldShowApiKeyFilter(activeTab)) return;
+    await Promise.all([refreshActiveTabData(), refreshScopedApiKeys()]);
+  }, [activeTab, apiKeyFilterReady, refreshActiveTabData, refreshScopedApiKeys]);
+
   const refreshAutoRefreshTab = useCallback(async () => {
+    invalidateScopedApiKeys();
     if (!apiKeyFilterReady && shouldShowApiKeyFilter(activeTab)) return;
     if (activeTab === 'realtime') {
       await loadRealtime();
@@ -1860,7 +1886,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
       return;
     }
     await Promise.all([loadUsage(), loadActivity({ skipIfInFlight: true }), loadComparisons({ skipIfInFlight: true })]);
-  }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadComparisons, loadEvents, loadRealtime, loadUsage, refreshCredentials]);
+  }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadComparisons, loadEvents, loadRealtime, loadUsage, refreshCredentials, invalidateScopedApiKeys]);
 
   const handleAutoRefreshError = useCallback((error: unknown) => {
     if (recoverRangeBoundsConflict(error)) return;
@@ -2270,6 +2296,8 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
                       <Select
                         value={selectedApiKeyId}
                         options={apiKeySelectOptions}
+                        selectedOption={selectedApiKeyOption}
+                        onOpen={scopedApiKeys.ensureFresh}
                         onChange={setSelectedApiKeyId}
                         className={styles.apiKeySelectControl}
                         ariaLabel={t('usage_stats.api_key_filter')}
@@ -2322,8 +2350,10 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
                   key="api-key"
                   value={selectedApiKeyId}
                   options={apiKeySelectOptions}
+                  selectedOption={selectedApiKeyOption}
+                  onOpen={scopedApiKeys.ensureFresh}
                   onChange={setSelectedApiKeyId}
-                  ariaLabel={`${t('usage_stats.api_key_filter')}: ${apiKeySelectOptions.find((option) => option.value === selectedApiKeyId)?.label ?? ''}`}
+                  ariaLabel={`${t('usage_stats.api_key_filter')}: ${selectedApiKeyOption.label}`}
                   fullWidth={false}
                   dropdownMinWidth={180}
                   renderValue={(option) => <><span data-dashboard-filter-caption>{t('usage_stats.api_key_filter')}</span><span data-dashboard-filter-value>{option?.label}</span></>}
@@ -2568,6 +2598,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
         open={credentialDetailOpen}
         selection={currentCredentialDetailSelection}
         timeZone={credentialTimeZone}
+        fallbackFocusRef={credentialEditFallbackRef}
         onResetStats={handleCredentialStatsReset}
         onAuthRequired={onAuthRequired}
         requestLogAccessEnabled={requestLogAccessEnabled}

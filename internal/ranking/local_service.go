@@ -102,6 +102,7 @@ type localRankingPopulationRow struct {
 	APIKey               string
 	DisplayKey           string
 	KeyAlias             string
+	SourceType           string
 	LocalRankingAvatarID *uint8
 	UpdatedAt            time.Time
 	localRankingMetrics
@@ -442,6 +443,7 @@ func (s *LocalRankingService) loadLocalRankingPopulation(ctx context.Context, wi
 		APIKey               string    `gorm:"column:api_key"`
 		DisplayKey           string    `gorm:"column:display_key"`
 		KeyAlias             string    `gorm:"column:key_alias"`
+		SourceType           string    `gorm:"column:source_type"`
 		LocalRankingAvatarID *uint8    `gorm:"column:local_ranking_avatar_id"`
 		RequestCount         int64     `gorm:"column:request_count"`
 		SuccessCount         int64     `gorm:"column:success_count"`
@@ -460,7 +462,7 @@ func (s *LocalRankingService) loadLocalRankingPopulation(ctx context.Context, wi
 	var loaded []row
 	if err := s.db.Clauses(dbresolver.Read).WithContext(ctx).
 		Table("local_ranking_period_stats AS stats").
-		Select("stats.api_key_id, keys.api_key, keys.display_key, keys.key_alias, keys.local_ranking_avatar_id, stats.request_count, stats.success_count, stats.failure_count, stats.input_tokens, stats.cache_read_tokens, stats.total_tokens, stats.ttft_sum_ms, stats.ttft_sample_count, stats.latency_sum_ms, stats.latency_sample_count, stats.peak_5m_request_count, stats.peak_5m_total_tokens, stats.updated_at").
+		Select("stats.api_key_id, keys.api_key, keys.display_key, keys.key_alias, keys.source_type, keys.local_ranking_avatar_id, stats.request_count, stats.success_count, stats.failure_count, stats.input_tokens, stats.cache_read_tokens, stats.total_tokens, stats.ttft_sum_ms, stats.ttft_sample_count, stats.latency_sum_ms, stats.latency_sample_count, stats.peak_5m_request_count, stats.peak_5m_total_tokens, stats.updated_at").
 		Joins("JOIN cpa_api_keys AS keys ON keys.id = stats.api_key_id").
 		Where("stats.period_kind = ? AND stats.period_key = ?", window.Kind, window.Key).
 		Order("stats.api_key_id ASC").
@@ -470,7 +472,7 @@ func (s *LocalRankingService) loadLocalRankingPopulation(ctx context.Context, wi
 	result := make([]localRankingPopulationRow, 0, len(loaded))
 	for _, item := range loaded {
 		result = append(result, localRankingPopulationRow{
-			APIKeyID: item.APIKeyID, APIKey: item.APIKey, DisplayKey: item.DisplayKey, KeyAlias: item.KeyAlias, LocalRankingAvatarID: item.LocalRankingAvatarID, UpdatedAt: item.UpdatedAt,
+			APIKeyID: item.APIKeyID, APIKey: item.APIKey, DisplayKey: item.DisplayKey, KeyAlias: item.KeyAlias, SourceType: item.SourceType, LocalRankingAvatarID: item.LocalRankingAvatarID, UpdatedAt: item.UpdatedAt,
 			localRankingMetrics: localRankingMetrics{
 				RequestCount: item.RequestCount, SuccessCount: item.SuccessCount, FailureCount: item.FailureCount,
 				InputTokens: item.InputTokens, CacheReadTokens: item.CacheReadTokens, TotalTokens: item.TotalTokens,

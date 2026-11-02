@@ -109,6 +109,7 @@ func (a *App) installReadyApp(ready *App) {
 	// The router keeps the service, but its runner must also reach the live App.
 	// Otherwise ranking reads succeed while snapshots are never generated.
 	a.LocalRanking = ready.LocalRanking
+	a.PluginAPIKeys = ready.PluginAPIKeys
 	a.Maintenance = ready.Maintenance
 	a.MetadataSync, a.QuotaService, a.QuotaAutoRefresh = ready.MetadataSync, ready.QuotaService, ready.QuotaAutoRefresh
 	a.BackupMaintenance, a.RecentUsageCache = ready.BackupMaintenance, ready.RecentUsageCache

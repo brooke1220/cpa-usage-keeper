@@ -180,7 +180,7 @@ func NewRouter(
 		registerCredentialPriorityRoutes(adminProtected, credentialPriorityProvider)
 	}
 	registerAuthSessionManagementRoutes(adminProtected, authHandler)
-	registerCPAAPIKeyRoutes(adminProtected, cpaAPIKeyProvider)
+	registerCPAAPIKeyRoutes(adminProtected, cpaAPIKeyProvider, usageProvider)
 	registerPricingRoutes(adminProtected, pricingProvider)
 	if statusConfig.IngestMode != "push" {
 		registerQuotaRoutes(adminProtected, quotaProvider)

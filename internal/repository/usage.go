@@ -395,26 +395,7 @@ func BuildAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.Ana
 	if filter.StartTime == nil || filter.EndTime == nil {
 		return nil, fmt.Errorf("analysis requires start_time and end_time")
 	}
-	windowMinutes := computeWindowMinutes(filter)
-	bucketByDay := windowMinutes > 24*60
-	if bucketByDay && (filter.Range == "today" || filter.Range == "yesterday") {
-		localStart := timeutil.NormalizeStorageTime(*filter.StartTime)
-		day, exists := timeutil.DayBounds(timeutil.DateOf(localStart), localStart.Location())
-		// Overview 小时桶按绝对整点聚合，无法拆分跨越自然日边界的半小时或四分之一小时。
-		// 长自然日仅在首尾均对齐时使用小时图，否则保留已有日汇总，避免漏算或混入相邻日。
-		if exists && day.Start.Equal(day.Start.Truncate(time.Hour)) && day.End.Equal(day.End.Truncate(time.Hour)) {
-			bucketByDay = false
-		}
-	}
-	if strings.TrimSpace(filter.Range) == "custom" {
-		// Custom 显式粒度与 Overview 保持一致，不能用单日跨度反推 hourly。
-		switch strings.TrimSpace(filter.CustomUnit) {
-		case "day":
-			bucketByDay = true
-		case "hour":
-			bucketByDay = false
-		}
-	}
+	bucketByDay := analysisUsesDailyStats(filter)
 	record := &dto.AnalysisRecord{
 		Granularity: func() dto.AnalysisGranularity {
 			if bucketByDay {

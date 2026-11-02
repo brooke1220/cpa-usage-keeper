@@ -66,7 +66,7 @@ func buildLocalLeaderboardEntries(rows []localRankingPopulationRow, metric Leade
 
 func localLeaderboardEntry(row localRankingPopulationRow, value int64) LeaderboardEntry {
 	displayName := helper.CPAAPIKeyDisplayName(entities.CPAAPIKey{
-		ID: row.APIKeyID, APIKey: row.APIKey, DisplayKey: row.DisplayKey, KeyAlias: row.KeyAlias,
+		ID: row.APIKeyID, APIKey: row.APIKey, DisplayKey: row.DisplayKey, KeyAlias: row.KeyAlias, SourceType: row.SourceType,
 	})
 	avatarID := defaultLocalRankingAvatarID(row.APIKeyID)
 	if row.LocalRankingAvatarID != nil && *row.LocalRankingAvatarID >= MinAvatarID && *row.LocalRankingAvatarID <= MaxAvatarID {
