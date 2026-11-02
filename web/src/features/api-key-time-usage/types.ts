@@ -51,5 +51,6 @@ export interface TimeUsageReport {
   key_summaries: TimeUsageKeySummary[];
 }
 export interface TimeUsageQuery { start: string; end: string; apiKeyId: string }
+export type TimeUsagePeriod = 'all' | 'work' | 'off';
 export type TimeUsagePreset = 'today' | 'yesterday' | '7d' | '30d' | 'custom';
 export type TimeUsageSort = 'total_tokens' | 'daily_average' | 'daytime_tokens' | 'after_hours_tokens' | 'after_hours_share' | 'message_count' | 'request_duration';

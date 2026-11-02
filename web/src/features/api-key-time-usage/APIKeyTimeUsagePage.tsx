@@ -11,6 +11,7 @@ import {
   alignTimeUsageDays,
   isWeekendDate,
   presetDates,
+  readStoredTimeUsagePeriod,
   readStoredTimeUsageRange,
   resolveTimeZone,
   sortTimeUsageKeys,
@@ -18,11 +19,12 @@ import {
   statisticalWeekday,
   timeUsageAvatarID,
   validTimeUsageDates,
+  writeStoredTimeUsagePeriod,
   writeStoredTimeUsageRange,
 } from './model';
 import { fetchWorkHours } from './api';
 import { useAPIKeyTimeUsage } from './useAPIKeyTimeUsage';
-import type { TimeUsageDay, TimeUsageKey, TimeUsageSort, TimeUsageTotals } from './types';
+import type { TimeUsageDay, TimeUsageKey, TimeUsagePeriod, TimeUsageSort, TimeUsageTotals } from './types';
 import avatarCatalogURL from './avatar-catalog.webp';
 import styles from './APIKeyTimeUsagePage.module.scss';
 
@@ -33,7 +35,9 @@ type SummaryColumn = 'total_tokens' | 'daytime_tokens' | 'after_hours_tokens';
 type Period = 'work' | 'off';
 
 const RANGE_PRESETS: RangePreset[] = ['today', '7d', '30d'];
+const PERIOD_FILTERS: TimeUsagePeriod[] = ['all', 'work', 'off'];
 const SUMMARY_COLUMNS: SummaryColumn[] = ['total_tokens', 'daytime_tokens', 'after_hours_tokens'];
+const periodColumn = (period: TimeUsagePeriod): SummaryColumn => period === 'work' ? 'daytime_tokens' : period === 'off' ? 'after_hours_tokens' : 'total_tokens';
 const presetLabel = (preset: RangePreset) => preset === '7d' ? 'last_7_days' : preset === '30d' ? 'last_30_days' : 'today';
 const totalAttribute = (column: SummaryColumn) => column === 'total_tokens' ? 'total' : column === 'daytime_tokens' ? 'daytime' : 'after_hours';
 const columnPeriod = (column: SummaryColumn): Period | undefined => column === 'daytime_tokens' ? 'work' : column === 'after_hours_tokens' ? 'off' : undefined;
@@ -84,7 +88,7 @@ function compactDuration(value: number, locale: string) {
   return remHours ? `${days}${units.d}${remHours}${units.h}` : `${days}${units.d}`;
 }
 
-const countOf = (row: TimeUsageTotals) => row.message_count ?? 0;
+const countOf = (row: TimeUsageTotals, period: TimeUsagePeriod = 'all') => (period === 'work' ? row.daytime_message_count : period === 'off' ? row.after_hours_message_count : row.message_count) ?? 0;
 const latencyOf = (row: TimeUsageTotals, period: 'work' | 'off') => period === 'work' ? (row.daytime_latency_ms ?? 0) : (row.after_hours_latency_ms ?? 0);
 const samplesOf = (row: TimeUsageTotals, period: 'work' | 'off') => period === 'work' ? (row.daytime_latency_samples ?? 0) : (row.after_hours_latency_samples ?? 0);
 
@@ -92,6 +96,19 @@ function IconCalendar() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
     <rect x="2.2" y="3.2" width="11.6" height="10.6" rx="1.8" stroke="currentColor" strokeWidth="1.4" />
     <path d="M2.2 6.5h11.6M5.4 1.8v2.6M10.6 1.8v2.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>;
+}
+
+function IconInfo() {
+  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <circle cx="8" cy="8" r="5.8" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M8 7.1v4M8 4.8v.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>;
+}
+
+function IconChevron() {
+  return <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>;
 }
 
@@ -150,9 +167,16 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   const { t, i18n } = useTranslation();
   const text = useCallback((key: string, params?: Record<string, string | number>) => t(`api_key_time_usage.${key}`, params), [t]);
   const headingId = useId();
+  const rulesId = useId();
+  const [showRules, setShowRules] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [sort, setSort] = useState<TimeUsageSort>('total_tokens');
+  const [period, setPeriod] = useState(readStoredTimeUsagePeriod);
+  const [sort, setSort] = useState<TimeUsageSort>(() => periodColumn(period));
   const [descending, setDescending] = useState(true);
+  const summaryColumns = period === 'all' ? SUMMARY_COLUMNS : [periodColumn(period)];
+  const showWork = period !== 'off';
+  const showOff = period !== 'work';
+  useEffect(() => writeStoredTimeUsagePeriod(period), [period]);
   // The usage API uses statistical-day labels in the project time zone. Before
   // the work start, the current statistical day is yesterday even though the
   // calendar date has already changed. Use the default start and the browser
@@ -255,6 +279,12 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
       setDescending(true);
     }
   };
+  const choosePeriod = (next: TimeUsagePeriod) => {
+    if (next === period) return;
+    setPeriod(next);
+    setSort(periodColumn(next));
+    setDescending(true);
+  };
   const commitRange = (next: { start: string; end: string }) => {
     setRange(next);
     if (validTimeUsageDates(next.start, next.end, today)) writeStoredTimeUsageRange(next);
@@ -271,8 +301,10 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   // Usage from keys that were never synced is not part of any row, so the total row
   // stays the sum of the table; say how much was left out instead of hiding it.
   const unattributed = data?.unattributed;
-  const unattributedNote = unattributed && ((unattributed.total_tokens ?? 0) > 0 || (unattributed.message_count ?? 0) > 0)
-    ? text('unattributed_note', { tokens: tokens(unattributed.total_tokens ?? 0), messages: messages(unattributed.message_count ?? 0) })
+  const unattributedTokens = unattributed?.[periodColumn(period)] ?? 0;
+  const unattributedMessages = unattributed ? countOf(unattributed, period) : 0;
+  const unattributedNote = unattributed && (unattributedTokens > 0 || unattributedMessages > 0)
+    ? text('unattributed_note', { tokens: tokens(unattributedTokens), messages: messages(unattributedMessages) })
     : '';
   const workLabel = text('daytime_tokens');
   const offLabel = text('after_hours_tokens');
@@ -299,13 +331,28 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
     </div>;
   };
 
-  return <section className={styles.page} aria-labelledby={headingId} data-api-key-time-usage>
+  return <section className={styles.page} aria-labelledby={headingId} data-api-key-time-usage data-time-period={period}>
     <div className={styles.ledger}>
       <header className={styles.heading}>
         <div className={styles.titleRow}>
           <div className={styles.titleBlock}>
             <h2 id={headingId}>{text('title')}{data && <span className={styles.count}>{ranked.length}</span>}</h2>
             <p>{text('subtitle')}</p>
+          </div>
+          {data && <div className={styles.schedule}>
+            <span><IconTimer size={14} />{text('work_clock', { start: data.daytime_start, end: data.daytime_end })}</span>
+            <span>{data.timezone}</span>
+          </div>}
+        </div>
+        <div className={styles.toolbar}>
+          <div className={styles.periodFilter} role="group" aria-label={text('period_filter')}>
+            <span className={styles.filterLabel}>{text('period_filter')}</span>
+            <div className={`${styles.presets} ${styles.periodPresets}`}>
+              {PERIOD_FILTERS.map(option => <button key={option} type="button" className={styles.preset} data-period-filter={option} aria-pressed={period === option} onClick={() => choosePeriod(option)}>
+                {option !== 'all' && <i className={option === 'work' ? styles.workSwatch : styles.offSwatch} aria-hidden="true" />}
+                {text(`period_${option}`)}
+              </button>)}
+            </div>
           </div>
           <div className={styles.filters}>
             <div className={styles.presets} role="group" aria-label={text('range_label')}>
@@ -319,21 +366,33 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
           </div>
         </div>
         {data && <div className={styles.meta}>
-          <div className={styles.rangeSummary} data-range-summary>
-            <span data-range-message title={`${text('message_count')} ${exact(countOf(data.summary))}`}><IconMessage /><strong>{messages(countOf(data.summary))}</strong></span>
-            <span data-range-duration="work" title={`${text('work_duration')} · ${durationTitle(latencyOf(data.summary, 'work'), samplesOf(data.summary, 'work'))}`}><i className={styles.workSwatch} aria-hidden="true" /><IconTimer size={12} /><strong>{duration(latencyOf(data.summary, 'work'))}</strong></span>
-            <span data-range-duration="off" title={`${text('off_duration')} · ${durationTitle(latencyOf(data.summary, 'off'), samplesOf(data.summary, 'off'))}`}><i className={styles.offSwatch} aria-hidden="true" /><IconTimer size={12} /><strong>{duration(latencyOf(data.summary, 'off'))}</strong></span>
+          <div className={styles.rangeSummary} data-range-summary data-period={period}>
+            <div className={styles.summaryMetric}>
+              <span className={styles.summaryLabel}>{text(periodColumn(period))}{period !== 'all' && <span className={styles.metricUnit}>Token</span>}</span>
+              <strong className={styles.summaryValue} data-range-tokens title={exact(data.summary[periodColumn(period)])}>{tokens(data.summary[periodColumn(period)])}</strong>
+            </div>
+            <div className={styles.summaryMetric}>
+              <span className={styles.summaryLabel}><IconMessage size={14} />{text('message_count')}</span>
+              <strong className={styles.summaryValue} data-range-message title={`${text('message_count')} ${exact(countOf(data.summary, period))}`}>{messages(countOf(data.summary, period))}</strong>
+            </div>
+            {showWork && <div className={styles.summaryMetric} data-range-duration="work" title={`${text('work_duration')} · ${durationTitle(latencyOf(data.summary, 'work'), samplesOf(data.summary, 'work'))}`}>
+              <span className={styles.summaryLabel}><i className={styles.workSwatch} aria-hidden="true" />{text('work_duration')}</span>
+              <strong className={styles.durationValue}>{duration(latencyOf(data.summary, 'work'))}</strong>
+            </div>}
+            {showOff && <div className={styles.summaryMetric} data-range-duration="off" title={`${text('off_duration')} · ${durationTitle(latencyOf(data.summary, 'off'), samplesOf(data.summary, 'off'))}`}>
+              <span className={styles.summaryLabel}><i className={styles.offSwatch} aria-hidden="true" />{text('off_duration')}</span>
+              <strong className={styles.durationValue}>{duration(latencyOf(data.summary, 'off'))}</strong>
+            </div>}
           </div>
           <div className={styles.metaTop}>
             <span className={styles.legend} data-time-usage-legend>
-              <span><i className={styles.workSwatch} aria-hidden="true" />{workLabel}</span>
-              <span><i className={styles.offSwatch} aria-hidden="true" />{offLabel}</span>
-              <span><IconMessage />{text('message_count')}</span>
-              <span><IconTimer size={12} />{text('request_duration')}</span>
+              {showWork && <span><i className={styles.workSwatch} aria-hidden="true" />{workLabel}</span>}
+              {showOff && <span><i className={styles.offSwatch} aria-hidden="true" />{offLabel}</span>}
             </span>
-            <span className={styles.hint}>{text('cell_order')}</span>
+            <span className={styles.hint}>{period === 'all' ? text('cell_order') : text('cell_order_filtered', { period: period === 'work' ? workLabel : offLabel })}</span>
+            <button type="button" className={styles.rulesToggle} data-rules-toggle aria-expanded={showRules} aria-controls={rulesId} onClick={() => setShowRules(value => !value)}><IconInfo />{text('statistical_rules')}<IconChevron /></button>
           </div>
-          <p className={styles.rule} data-day-rule>{rule}</p>
+          <div id={rulesId} className={styles.rulePanel} hidden={!showRules}><p className={styles.rule} data-day-rule>{rule}</p></div>
           {unattributedNote && <p className={styles.rule} data-unattributed-note>{unattributedNote}</p>}
         </div>}
       </header>
@@ -347,9 +406,9 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
         <table className={`${styles.table} ${styles.matrix}`} data-daily-ledger>
           <thead><tr>
             <th scope="col" className={styles.nameCol}>{text('api_key')}</th>
-            {SUMMARY_COLUMNS.map(column => {
+            {summaryColumns.map((column, index) => {
               const period = columnPeriod(column);
-              return <th key={column} scope="col" className={styles.totalCol} data-summary={column} aria-sort={sort === column ? (descending ? 'descending' : 'ascending') : 'none'}>
+              return <th key={column} scope="col" className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} aria-sort={sort === column ? (descending ? 'descending' : 'ascending') : 'none'}>
                 <button type="button" className={styles.headSort} data-sort={column} aria-pressed={sort === column} onClick={() => chooseSort(column)}>
                   {period && <i className={period === 'work' ? styles.workSwatch : styles.offSwatch} aria-hidden="true" />}
                   <span>{text(column)}</span>
@@ -376,17 +435,17 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
                   </span>
                 </div>
               </th>
-              {SUMMARY_COLUMNS.map(column => <td key={column} className={styles.totalCol} data-summary={column} data-key-total={totalAttribute(column)} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(row, column)}</td>)}
+              {summaryColumns.map((column, index) => <td key={column} className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} data-key-total={totalAttribute(column)} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(row, column)}</td>)}
               {days.map((day, index) => <td key={day.date} data-date={day.date} data-today={day.is_today ? 'true' : undefined} data-weekend={calendarMeta[index]?.weekend ? 'true' : undefined} className={styles.dayCell}>
-                <DayPair day={day} format={tokens} messages={messages} duration={cellDuration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} />
+                <DayPair day={day} period={period} format={tokens} messages={messages} duration={cellDuration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} />
               </td>)}
             </tr>;
           })}</tbody>
           <tfoot><tr>
             <th scope="row" className={styles.nameCol}>{text('total')}</th>
-            {SUMMARY_COLUMNS.map(column => <td key={column} className={styles.totalCol} data-summary={column} data-key-total={totalAttribute(column)} data-stat={column} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(data.summary, column)}</td>)}
+            {summaryColumns.map((column, index) => <td key={column} className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} data-key-total={totalAttribute(column)} data-stat={column} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(data.summary, column)}</td>)}
             {calendarMeta.map(({ day, weekend }) => <td key={day.date} data-today={day.is_today ? 'true' : undefined} data-weekend={weekend ? 'true' : undefined} className={styles.dayCell}>
-              <DayPair day={day} format={tokens} messages={messages} duration={cellDuration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} />
+              <DayPair day={day} period={period} format={tokens} messages={messages} duration={cellDuration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} />
             </td>)}
           </tr></tfoot>
         </table>
@@ -395,8 +454,9 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   </section>;
 }
 
-const DayPair = memo(function DayPair({ day, format, messages, duration, exact, durationTitle, workLabel, offLabel, messageLabel, durationLabel }: {
+const DayPair = memo(function DayPair({ day, period, format, messages, duration, exact, durationTitle, workLabel, offLabel, messageLabel, durationLabel }: {
   day: TimeUsageDay;
+  period: TimeUsagePeriod;
   format: (value: number) => string;
   messages: (value: number) => string;
   duration: (value: number) => string;
@@ -421,8 +481,8 @@ const DayPair = memo(function DayPair({ day, format, messages, duration, exact, 
     </div>;
   };
   return <div className={styles.pair}>
-    {band('work', day.daytime_tokens, workLabel)}
-    <SplitBar work={day.daytime_tokens} off={day.after_hours_tokens} compact />
-    {band('off', day.after_hours_tokens, offLabel)}
+    {period !== 'off' && band('work', day.daytime_tokens, workLabel)}
+    {period === 'all' && <SplitBar work={day.daytime_tokens} off={day.after_hours_tokens} compact />}
+    {period !== 'work' && band('off', day.after_hours_tokens, offLabel)}
   </div>;
 });

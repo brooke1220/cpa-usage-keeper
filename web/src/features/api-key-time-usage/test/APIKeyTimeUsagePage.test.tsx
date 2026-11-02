@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APIKeyTimeUsagePage } from '../APIKeyTimeUsagePage';
 import { fetchAPIKeyTimeUsage, fetchWorkHours } from '../api';
-import { TIME_USAGE_RANGE_STORAGE_KEY } from '../model';
+import { TIME_USAGE_PERIOD_STORAGE_KEY, TIME_USAGE_RANGE_STORAGE_KEY } from '../model';
 import { ApiError } from '@/lib/api';
 import { sampleReport } from './fixtures';
 import type { TimeUsageReport } from '../types';
@@ -37,13 +37,81 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-09T04:00:00Z'));
   localStorage.removeItem(TIME_USAGE_RANGE_STORAGE_KEY);
+  localStorage.removeItem(TIME_USAGE_PERIOD_STORAGE_KEY);
   api.mockReset().mockResolvedValue(sampleReport());
   workHours.mockReset().mockResolvedValue({ timezone: 'Asia/Shanghai', start: '09:00', end: '18:00', source: 'default' });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); localStorage.removeItem(TIME_USAGE_RANGE_STORAGE_KEY); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); localStorage.removeItem(TIME_USAGE_RANGE_STORAGE_KEY); localStorage.removeItem(TIME_USAGE_PERIOD_STORAGE_KEY); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('API Key time usage page', () => {
+  it.each([
+    { period: 'work', hidden: 'off', column: 'daytime_tokens', total: '520', messages: '8', firstKey: '1', firstDayTokens: '280', latency: '5,001,000 ms' },
+    { period: 'off', hidden: 'work', column: 'after_hours_tokens', total: '780', messages: '5', firstKey: '2', firstDayTokens: '120', latency: '1,000 ms' },
+  ])('filters summaries, daily cells and sorting to $period without another request', async ({ period, hidden, column, total, messages, firstKey, firstDayTokens, latency }) => {
+    const data = sampleReport();
+    Object.assign(data.key_summaries[1], { total_tokens: 700, daytime_tokens: 100, after_hours_tokens: 600 });
+    Object.assign(data.summary, { total_tokens: 1300, daytime_tokens: 520, after_hours_tokens: 780 });
+    data.unattributed = { ...data.summary, total_tokens: 90, daytime_tokens: 40, after_hours_tokens: 50 };
+    api.mockResolvedValue(data);
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-period-filter="all"]')?.getAttribute('aria-pressed')).toBe('true');
+    await click(`[data-period-filter="${period}"]`);
+
+    expect(container.querySelector(`[data-period-filter="${period}"]`)?.getAttribute('aria-pressed')).toBe('true');
+    expect([...container.querySelectorAll('thead [data-summary]')].map(node => node.getAttribute('data-summary'))).toEqual([column]);
+    expect(container.querySelector(`thead [data-summary="${column}"]`)?.getAttribute('aria-sort')).toBe('descending');
+    expect(container.querySelector(`thead [data-summary="${column}"]`)?.getAttribute('data-summary-end')).toBe('true');
+    expect(container.querySelector('tbody tr')?.getAttribute('data-time-usage-key')).toBe(firstKey);
+    expect(container.querySelector('tfoot [data-figure="tokens"]')?.textContent).toBe(total);
+    expect(container.querySelector('[data-range-tokens]')?.textContent).toBe(total);
+    expect(container.querySelector('tfoot [data-metric="messages"]')?.textContent).toBe(messages);
+    expect(container.querySelector('tfoot [data-metric="duration"]')?.getAttribute('title')).toContain(latency);
+    expect(container.querySelector('[data-range-message]')?.textContent).toBe(messages);
+    expect(container.querySelector(`[data-range-duration="${period}"]`)?.getAttribute('title')).toContain(latency);
+    expect(container.querySelector(`[data-range-duration="${hidden}"]`)).toBeNull();
+    expect(container.querySelector(`[data-daily-ledger] [data-period="${hidden}"]`)).toBeNull();
+    expect(container.querySelector(`[data-time-usage-key="1"] [data-date="2026-10-01"] [data-figure="tokens"]`)?.textContent).toBe(firstDayTokens);
+    expect(container.querySelector('tfoot [class*="band"]')?.getAttribute('data-period')).toBe(period);
+    expect(container.querySelector('[data-time-usage-legend]')?.textContent).not.toContain(hidden === 'off' ? 'api_key_time_usage.after_hours_tokens' : 'api_key_time_usage.daytime_tokens');
+    expect(container.querySelector('[data-unattributed-note]')?.textContent).toContain(`"messages":"${messages}"`);
+    expect(container.querySelector('[data-unattributed-note]')?.textContent).toContain(`"tokens":"${period === 'work' ? '40' : '50'}"`);
+    await click(`[data-sort="${column}"]`);
+    expect(container.querySelector(`thead [data-summary="${column}"]`)?.getAttribute('aria-sort')).toBe('ascending');
+    expect(container.querySelector('tbody tr')?.getAttribute('data-time-usage-key')).not.toBe(firstKey);
+
+    await click('[data-period-filter="all"]');
+    expect(container.querySelectorAll('thead [data-summary]')).toHaveLength(3);
+    expect(container.querySelector('thead [data-summary="total_tokens"]')?.getAttribute('aria-sort')).toBe('descending');
+    expect(container.querySelector('tfoot [data-stat="total_tokens"] [data-figure="tokens"]')?.textContent).toBe('1.30K');
+    expect(container.querySelector('[data-range-message]')?.textContent).toBe('13');
+    expect(container.querySelectorAll('[data-time-usage-key="1"] [data-date="2026-10-01"] [data-figure="tokens"]')).toHaveLength(2);
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLInputElement>('[data-range-start]')?.value).toBe(weekQuery.start);
+  });
+
+  it('remembers the period through date changes, parent refresh and remount', async () => {
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    await click('[data-period-filter="off"]');
+    await click('[data-range-preset="today"]');
+    await act(async () => root.render(<APIKeyTimeUsagePage refreshToken={1} />));
+    expect(container.querySelector('[data-period-filter="off"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem(TIME_USAGE_PERIOD_STORAGE_KEY)).toBe('off');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-period-filter="off"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('thead [data-summary="after_hours_tokens"]')?.getAttribute('aria-sort')).toBe('descending');
+    expect(container.querySelector('thead [data-summary="total_tokens"]')).toBeNull();
+  });
+
+  it('falls back to all periods for an invalid saved selection', async () => {
+    localStorage.setItem(TIME_USAGE_PERIOD_STORAGE_KEY, 'invalid');
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-period-filter="all"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelectorAll('thead [data-summary]')).toHaveLength(3);
+  });
+
   it('uses the previous statistical day before work starts', async () => {
     vi.setSystemTime(new Date('2026-10-11T23:00:00Z')); // 07:00 on Oct 12 in Shanghai.
     await act(async () => root.render(<APIKeyTimeUsagePage />));

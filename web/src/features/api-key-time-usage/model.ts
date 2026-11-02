@@ -1,4 +1,4 @@
-import type { TimeUsageDay, TimeUsageKeySummary, TimeUsagePreset, TimeUsageSort, TimeUsageTotals } from './types';
+import type { TimeUsageDay, TimeUsageKeySummary, TimeUsagePeriod, TimeUsagePreset, TimeUsageSort, TimeUsageTotals } from './types';
 
 // Work-hour boundaries must sit on the server's 15-minute rollup buckets.
 export const WORK_HOURS_STEP_MINUTES = 15;
@@ -92,6 +92,22 @@ export const validTimeUsageDates = (start: string, end: string, today: string): 
   return valid(start) && valid(end) && start <= end && start >= addDateDays(today, -89) && end <= today;
 };
 export const TIME_USAGE_RANGE_STORAGE_KEY = 'api-key-time-usage-range';
+export const TIME_USAGE_PERIOD_STORAGE_KEY = 'api-key-time-usage-period';
+export const readStoredTimeUsagePeriod = (): TimeUsagePeriod => {
+  try {
+    const value = typeof window === 'undefined' ? null : window.localStorage.getItem(TIME_USAGE_PERIOD_STORAGE_KEY);
+    return value === 'work' || value === 'off' ? value : 'all';
+  } catch {
+    return 'all';
+  }
+};
+export const writeStoredTimeUsagePeriod = (period: TimeUsagePeriod) => {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(TIME_USAGE_PERIOD_STORAGE_KEY, period);
+  } catch {
+    // An unavailable preference store must not block changing the visible period.
+  }
+};
 export const parseStoredTimeUsageRange = (raw: string | null, today: string): { start: string; end: string } | null => {
   if (!raw) return null;
   try {
