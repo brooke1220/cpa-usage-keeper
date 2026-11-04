@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import type { UsageEventRequestLogResponse, UsageEventsResponse } from '@/lib/types';
 import { sampleReport } from '@/features/api-key-time-usage/test/fixtures';
-import { TIME_USAGE_TASK_TIME_STORAGE_KEY } from '@/features/api-key-time-usage/model';
+import { TIME_USAGE_TASK_IDLE_STORAGE_KEY, TIME_USAGE_TASK_TIME_STORAGE_KEY } from '@/features/api-key-time-usage/model';
 
 const api = vi.hoisted(() => ({
   fetchUsageEventRequestLog: vi.fn(),
@@ -127,7 +127,7 @@ describe('UsagePage runtime behavior', () => {
     expect(networkFetch).not.toHaveBeenCalled();
   });
 
-  it('keeps the task-time switch in settings and applies both choices on returning to usage', async () => {
+  it('keeps task-time and idle settings together and applies them on returning to usage', async () => {
     window.history.replaceState(null, '', '/settings');
     await render();
     const navigate = async (path: string) => {
@@ -137,23 +137,38 @@ describe('UsagePage runtime behavior', () => {
     };
     const toggle = container.querySelector<HTMLInputElement>('[data-task-time-settings] [role="switch"]')!;
     expect(toggle.checked).toBe(false);
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
     expect(toggle.closest('label')?.textContent).toBe('Show task time (merge sessions)');
     expect(document.getElementById(toggle.getAttribute('aria-describedby')!)?.textContent).toContain('Disable to restore');
     expect(api.fetchAPIKeyTimeUsage).not.toHaveBeenCalled();
     await act(async () => toggle.click());
     expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('true');
+    expect([...container.querySelectorAll('[data-task-idle]')].map(node => node.getAttribute('data-task-idle'))).toEqual(['5', '10', '30', '60']);
+    expect(container.querySelector('[data-task-idle="10"]')?.getAttribute('aria-pressed')).toBe('true');
+    for (const minutes of [5, 30, 60]) {
+      await act(async () => container.querySelector<HTMLButtonElement>(`[data-task-idle="${minutes}"]`)!.click());
+      expect(localStorage.getItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY)).toBe(String(minutes));
+      expect(container.querySelectorAll('[data-task-idle][aria-pressed="true"]')).toHaveLength(1);
+      expect(container.querySelector(`[data-task-idle="${minutes}"]`)?.getAttribute('aria-pressed')).toBe('true');
+    }
     await navigate('/api-key-usage');
-    expect(api.fetchAPIKeyTimeUsage).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeEnabled: true }), expect.any(AbortSignal));
-    expect(container.querySelector('[data-task-time-toggle]')).toBeNull();
+    expect(api.fetchAPIKeyTimeUsage).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeEnabled: true, taskIdleMinutes: 60 }), expect.any(AbortSignal));
+    expect(container.querySelector('[data-task-time-toggle], [data-task-idle]')).toBeNull();
     expect(container.querySelector('[data-range-task]')).not.toBeNull();
 
     await navigate('/settings');
     expect(container.querySelector<HTMLInputElement>('[data-task-time-toggle]')?.checked).toBe(true);
+    expect(container.querySelector('[data-task-idle="60"]')?.getAttribute('aria-pressed')).toBe('true');
     await act(async () => container.querySelector<HTMLInputElement>('[data-task-time-toggle]')!.click());
     expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('false');
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
     await navigate('/api-key-usage');
     expect(api.fetchAPIKeyTimeUsage).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeEnabled: false }), expect.any(AbortSignal));
     expect(container.querySelector('[data-task-time-toggle], [data-range-task], [data-task-idle], [data-metric="task"]')).toBeNull();
+    await navigate('/settings');
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
+    await act(async () => container.querySelector<HTMLInputElement>('[data-task-time-toggle]')!.click());
+    expect(container.querySelector('[data-task-idle="60"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
   const openPendingRequestLog = async () => {

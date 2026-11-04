@@ -35,10 +35,11 @@ const setDate = async (selector: string, value: string) => {
 };
 
 // Follow the same unmount/remount boundary as the real settings and usage tabs.
-const configureTaskTime = async (enabled: boolean) => {
+const configureTaskTime = async (enabled: boolean, idleMinutes?: number) => {
   await act(async () => root.render(<TaskTimeSettingsCard />));
   const toggle = container.querySelector<HTMLInputElement>('[data-task-time-toggle]')!;
   if (toggle.checked !== enabled) await click('[data-task-time-toggle]');
+  if (enabled && idleMinutes != null) await click(`[data-task-idle="${idleMinutes}"]`);
   await act(async () => root.render(<APIKeyTimeUsagePage />));
 };
 
@@ -79,7 +80,7 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('[data-range-summary]')?.children).toHaveLength(6);
     expect(container.querySelector('[data-metric="task"]')).not.toBeNull();
     expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('true');
-    await click('[data-task-idle="30"]');
+    await configureTaskTime(true, 30);
     await act(async () => root.render(<APIKeyTimeUsagePage refreshToken={1} />));
     await act(async () => root.unmount());
     root = createRoot(container);
@@ -96,7 +97,7 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('[data-range-summary]')?.getAttribute('data-task-time')).toBe('false');
     expect(container.querySelector('[data-metric="task"]')).toBeNull();
     await configureTaskTime(true);
-    expect(container.querySelector('[data-task-idle="30"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
   });
 
   it('hides task content immediately and ignores a late enabled response after switching off', async () => {
@@ -104,7 +105,7 @@ describe('API Key time usage page', () => {
     await act(async () => root.render(<APIKeyTimeUsagePage />));
     let resolveEnabled!: (report: TimeUsageReport) => void;
     api.mockImplementationOnce(() => new Promise(resolve => { resolveEnabled = resolve; }));
-    await click('[data-task-idle="30"]');
+    await configureTaskTime(true, 30);
     const enabledSignal = api.mock.calls.at(-1)![1]!;
     let resolveDisabled!: (report: TimeUsageReport) => void;
     api.mockImplementationOnce(() => new Promise(resolve => { resolveDisabled = resolve; }));
@@ -253,7 +254,7 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('tbody tr')?.getAttribute('data-time-usage-key')).toBe('2');
   });
 
-  it('shows task time after each cumulative time', async () => {
+  it('appends unlabeled task time to the same metadata row and keeps the full hover hint', async () => {
     localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
     await act(async () => root.render(<APIKeyTimeUsagePage />));
     expect([...container.querySelectorAll('[data-range-summary] > [data-range-duration], [data-range-summary] > [data-range-task]')]
@@ -264,19 +265,27 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('[data-time-usage-key="1"] [data-key-total="daytime"] [data-metric="task"] strong')?.textContent).toBe('1h40m');
     expect(container.querySelector('[data-time-usage-key="2"] [data-key-total="after_hours"] [data-metric="task"] strong')?.textContent).toBe('1m');
     expect(container.querySelector('[data-time-usage-key="1"] [data-date="2026-10-01"] [data-metric="task"][data-period="work"]')).not.toBeNull();
-    const band = container.querySelector('tfoot [class*="band"][data-period="work"]')!;
-    expect(band.lastElementChild?.getAttribute('data-metric')).toBe('task');
+    for (const task of container.querySelectorAll<HTMLElement>('[data-daily-ledger] [data-metric="task"]')) {
+      const metrics = [...task.parentElement!.querySelectorAll('[data-metric]')].map(node => node.getAttribute('data-metric'));
+      expect(metrics).toEqual(['messages', 'duration', 'task']);
+      expect(task.parentElement!.lastElementChild).toBe(task);
+      expect(task.textContent).toBe(task.querySelector('strong')?.textContent);
+      expect(task.querySelector('em')).toBeNull();
+      expect(task.title).toContain('api_key_time_usage.task_duration');
+      expect(task.getAttribute('aria-label')).toBe(task.title);
+    }
+    expect(container.querySelector('[data-time-usage-key="1"] [data-key-total="daytime"] [data-metric="task"]')?.getAttribute('title')).toContain('1h 40m');
     expect(container.querySelector('[data-day-rule]')?.textContent).toContain('"idle":10');
   });
 
-  it('reloads with the chosen idle gap and remembers it', async () => {
+  it('loads the idle gap chosen in settings and remembers it', async () => {
     localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
     await act(async () => root.render(<APIKeyTimeUsagePage />));
-    expect(container.querySelector('[data-task-idle="10"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
     api.mockResolvedValue({ ...sampleReport(), task_idle_minutes: 30 });
-    await click('[data-task-idle="30"]');
+    await configureTaskTime(true, 30);
     expect(api).toHaveBeenLastCalledWith({ ...weekQuery, taskIdleMinutes: 30, taskTimeEnabled: true }, expect.any(AbortSignal));
-    expect(container.querySelector('[data-task-idle="30"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
     expect(container.querySelector('[data-day-rule]')?.textContent).toContain('"idle":30');
     expect(localStorage.getItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY)).toBe('30');
     await act(async () => root.unmount());
@@ -290,7 +299,7 @@ describe('API Key time usage page', () => {
     localStorage.setItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY, '15');
     await act(async () => root.render(<APIKeyTimeUsagePage />));
     expect(api).toHaveBeenCalledWith({ ...weekQuery, taskTimeEnabled: true }, expect.any(AbortSignal));
-    expect(container.querySelector('[data-task-idle="10"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-task-idle]')).toBeNull();
   });
 
   it('computes the statistical day in the project time zone from the schedule', async () => {

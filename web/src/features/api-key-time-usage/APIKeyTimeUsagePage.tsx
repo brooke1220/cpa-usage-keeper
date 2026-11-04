@@ -19,10 +19,8 @@ import {
   sortTimeUsageKeys,
   statisticalDate,
   statisticalWeekday,
-  TASK_IDLE_MINUTE_OPTIONS,
   timeUsageAvatarID,
   validTimeUsageDates,
-  writeStoredTaskIdleMinutes,
   writeStoredTimeUsagePeriod,
   writeStoredTimeUsageRange,
 } from './model';
@@ -128,19 +126,10 @@ function IconMessage({ size = 12 }: { size?: number }) {
   </svg>;
 }
 
-function SubLine({ metric, period, label, value, title, plain = false }: { metric: 'messages' | 'duration'; period?: 'work' | 'off'; label: string; value: string; title?: string; plain?: boolean }) {
+function SubLine({ metric, period, label, value, title, plain = false }: { metric: 'messages' | 'duration' | 'task'; period?: 'work' | 'off'; label: string; value: string; title?: string; plain?: boolean }) {
   const hint = title && title !== value ? `${label} · ${title}` : `${label} ${value}`;
   return <span className={styles.subLine} data-metric={metric} data-period={period} title={hint} aria-label={hint}>
     {!plain && <em aria-hidden="true">{metric === 'messages' ? <IconMessage /> : <IconTimer size={12} />}</em>}
-    <strong>{value}</strong>
-  </span>;
-}
-
-// Task time sits on its own line: a day cell has no room for a third value beside messages and time.
-function TaskLine({ period, label, short, value, title }: { period?: 'work' | 'off'; label: string; short: string; value: string; title: string }) {
-  const hint = `${label} ${title}`;
-  return <span className={styles.subLine} data-metric="task" data-period={period} title={hint} aria-label={hint}>
-    <em aria-hidden="true">{short}</em>
     <strong>{value}</strong>
   </span>;
 }
@@ -187,13 +176,12 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   const [period, setPeriod] = useState(readStoredTimeUsagePeriod);
   const [sort, setSort] = useState<TimeUsageSort>(() => periodColumn(period));
   const [descending, setDescending] = useState(true);
-  const [taskIdle, setTaskIdle] = useState(readStoredTaskIdleMinutes);
+  const [taskIdle] = useState(readStoredTaskIdleMinutes);
   const [taskTimeEnabled] = useState(readStoredTaskTimeEnabled);
   const summaryColumns = period === 'all' ? SUMMARY_COLUMNS : [periodColumn(period)];
   const showWork = period !== 'off';
   const showOff = period !== 'work';
   useEffect(() => writeStoredTimeUsagePeriod(period), [period]);
-  useEffect(() => writeStoredTaskIdleMinutes(taskIdle), [taskIdle]);
   // The usage API uses statistical-day labels in the project time zone. Before
   // the work start, the current statistical day is yesterday even though the
   // calendar date has already changed. Use the default start and the browser
@@ -345,12 +333,15 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
         <SubLine plain metric="messages" period={period} label={text('message_count')} value={messages(messageCount)} title={exact(messageCount)} />
         <span className={styles.metaDot} aria-hidden="true">·</span>
         <SubLine plain metric="duration" period={period} label={text('request_duration')} value={cellDuration(durationMs)} title={durationTitle(durationMs, samples)} />
+        {taskTimeEnabled && <>
+          <span className={styles.metaDot} aria-hidden="true">·</span>
+          <SubLine plain metric="task" period={period} label={text('task_duration')} value={cellDuration(taskMs)} title={duration(taskMs)} />
+        </>}
       </MetaRow>
-      {taskTimeEnabled && <TaskLine period={period} label={text('task_duration')} short={text('task_short')} value={cellDuration(taskMs)} title={duration(taskMs)} />}
     </div>;
   };
 
-  return <section className={styles.page} aria-labelledby={headingId} data-api-key-time-usage data-time-period={period}>
+  return <section className={styles.page} aria-labelledby={headingId} data-api-key-time-usage data-time-period={period} data-task-time={String(taskTimeEnabled)}>
     <div className={styles.ledger}>
       <header className={styles.heading}>
         <div className={styles.titleRow}>
@@ -373,14 +364,6 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
               </button>)}
             </div>
           </div>
-          {taskTimeEnabled && <div className={styles.taskIdleFilter} role="group" aria-label={text('task_idle')} title={text('task_idle_hint')}>
-            <span className={styles.filterLabel}>{text('task_idle')}</span>
-            <div className={`${styles.presets} ${styles.taskIdlePresets}`}>
-              {TASK_IDLE_MINUTE_OPTIONS.map(option => <button key={option} type="button" className={styles.preset} data-task-idle={option} aria-pressed={taskIdle === option} onClick={() => setTaskIdle(option)}>
-                {text('task_idle_option', { count: option })}
-              </button>)}
-            </div>
-          </div>}
           <div className={styles.filters}>
             <div className={styles.presets} role="group" aria-label={text('range_label')}>
               {RANGE_PRESETS.map(preset => <button key={preset} type="button" className={styles.preset} data-range-preset={preset} aria-pressed={activePreset === preset} onClick={() => applyPreset(preset)}>{text(presetLabel(preset))}</button>)}
@@ -472,7 +455,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
               </th>
               {summaryColumns.map((column, index) => <td key={column} className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} data-key-total={totalAttribute(column)} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(row, column)}</td>)}
               {days.map((day, index) => <td key={day.date} data-date={day.date} data-today={day.is_today ? 'true' : undefined} data-weekend={calendarMeta[index]?.weekend ? 'true' : undefined} className={styles.dayCell}>
-                <DayPair day={day} period={period} taskTimeEnabled={taskTimeEnabled} format={tokens} messages={messages} duration={cellDuration} fullDuration={duration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} taskLabel={text('task_duration')} taskShort={text('task_short')} />
+                <DayPair day={day} period={period} taskTimeEnabled={taskTimeEnabled} format={tokens} messages={messages} duration={cellDuration} fullDuration={duration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} taskLabel={text('task_duration')} />
               </td>)}
             </tr>;
           })}</tbody>
@@ -480,7 +463,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
             <th scope="row" className={styles.nameCol}>{text('total')}</th>
             {summaryColumns.map((column, index) => <td key={column} className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} data-key-total={totalAttribute(column)} data-stat={column} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(data.summary, column)}</td>)}
             {calendarMeta.map(({ day, weekend }) => <td key={day.date} data-today={day.is_today ? 'true' : undefined} data-weekend={weekend ? 'true' : undefined} className={styles.dayCell}>
-              <DayPair day={day} period={period} taskTimeEnabled={taskTimeEnabled} format={tokens} messages={messages} duration={cellDuration} fullDuration={duration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} taskLabel={text('task_duration')} taskShort={text('task_short')} />
+              <DayPair day={day} period={period} taskTimeEnabled={taskTimeEnabled} format={tokens} messages={messages} duration={cellDuration} fullDuration={duration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} taskLabel={text('task_duration')} />
             </td>)}
           </tr></tfoot>
         </table>
@@ -489,7 +472,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   </section>;
 }
 
-const DayPair = memo(function DayPair({ day, period, taskTimeEnabled, format, messages, duration, fullDuration, exact, durationTitle, workLabel, offLabel, messageLabel, durationLabel, taskLabel, taskShort }: {
+const DayPair = memo(function DayPair({ day, period, taskTimeEnabled, format, messages, duration, fullDuration, exact, durationTitle, workLabel, offLabel, messageLabel, durationLabel, taskLabel }: {
   day: TimeUsageDay;
   period: TimeUsagePeriod;
   taskTimeEnabled: boolean;
@@ -504,7 +487,6 @@ const DayPair = memo(function DayPair({ day, period, taskTimeEnabled, format, me
   messageLabel: string;
   durationLabel: string;
   taskLabel: string;
-  taskShort: string;
 }) {
   const band = (period: 'work' | 'off', tokens: number, label: string) => {
     const messageCount = period === 'work' ? (day.daytime_message_count ?? 0) : (day.after_hours_message_count ?? 0);
@@ -517,8 +499,11 @@ const DayPair = memo(function DayPair({ day, period, taskTimeEnabled, format, me
         <SubLine plain metric="messages" period={period} label={messageLabel} value={messages(messageCount)} title={exact(messageCount)} />
         <span className={styles.metaDot} aria-hidden="true">·</span>
         <SubLine plain metric="duration" period={period} label={durationLabel} value={duration(durationMs)} title={durationTitle(durationMs, samplesOf(day, period))} />
+        {taskTimeEnabled && <>
+          <span className={styles.metaDot} aria-hidden="true">·</span>
+          <SubLine plain metric="task" period={period} label={taskLabel} value={duration(taskMs)} title={fullDuration(taskMs)} />
+        </>}
       </MetaRow>
-      {taskTimeEnabled && <TaskLine period={period} label={taskLabel} short={taskShort} value={duration(taskMs)} title={fullDuration(taskMs)} />}
     </div>;
   };
   return <div className={styles.pair}>

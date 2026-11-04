@@ -17,6 +17,11 @@
 
 .page[data-time-period='off'] { --usage-selected-mark: var(--usage-off-mark); }
 
+.page[data-task-time='true'] {
+  --usage-summary-width: 184px;
+  --usage-day-width: 176px;
+}
+
 :global([data-theme='dark']) .page {
   --usage-work: #a9c9f6;
   --usage-off: #e6c48a;
@@ -133,13 +138,6 @@
 }
 
 .periodFilter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-}
-
-.taskIdleFilter {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -795,18 +793,9 @@ thead .totalCol[aria-sort='descending'] .sortMark {
 
 .subLine[data-metric='messages'] { flex: 0 0 auto; }
 
-.subLine[data-metric='duration'] {
-  overflow: hidden;
-}
-
+.subLine[data-metric='duration'],
 .subLine[data-metric='task'] {
-  align-self: flex-end;
   overflow: hidden;
-
-  em {
-    font-size: 11px;
-    font-weight: 500;
-  }
 }
 
 .summaryStack > [data-figure='tokens'],
@@ -1015,14 +1004,12 @@ thead .totalCol[aria-sort='descending'] .sortMark {
     gap: 14px;
   }
 
-  .periodFilter,
-  .taskIdleFilter {
+  .periodFilter {
     width: 100%;
     gap: 8px;
   }
 
-  .periodPresets,
-  .taskIdlePresets {
+  .periodPresets {
     width: 100%;
 
     .preset { flex: 1 1 0; }
