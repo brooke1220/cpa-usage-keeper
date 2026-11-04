@@ -11,15 +11,17 @@ describe('time usage API', () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(sampleReport()), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
     const controller = new AbortController();
-    expect(await fetchAPIKeyTimeUsage({ start: '2026-10-03', end: '2026-10-09', apiKeyId: '42' }, controller.signal)).toEqual(sampleReport());
-    expect(fetch).toHaveBeenCalledWith('/keeper/api/v1/usage/api-key-time-usage?start_date=2026-10-03&end_date=2026-10-09&api_key_id=42', expect.objectContaining({ credentials: 'include', cache: 'no-store', signal: controller.signal }));
+    expect(await fetchAPIKeyTimeUsage({ start: '2026-10-03', end: '2026-10-09', apiKeyId: '42', taskIdleMinutes: 30, taskTimeEnabled: true }, controller.signal)).toEqual(sampleReport());
+    expect(fetch).toHaveBeenCalledWith('/keeper/api/v1/usage/api-key-time-usage?start_date=2026-10-03&end_date=2026-10-09&task_time_enabled=true&task_idle_minutes=30&api_key_id=42', expect.objectContaining({ credentials: 'include', cache: 'no-store', signal: controller.signal }));
   });
   it('omits an empty key selector and preserves API errors', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_api_key_time_usage_query' }), { status: 400 }));
     vi.stubGlobal('fetch', fetch);
-    await expect(fetchAPIKeyTimeUsage({ start: '', end: '', apiKeyId: '' })).rejects.toMatchObject({ status: 400, message: 'invalid_api_key_time_usage_query' });
+    await expect(fetchAPIKeyTimeUsage({ start: '', end: '', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false })).rejects.toMatchObject({ status: 400, message: 'invalid_api_key_time_usage_query' });
     expect(fetch.mock.calls[0][0]).not.toContain('api_key_id');
+    expect(fetch.mock.calls[0][0]).toContain('task_time_enabled=false');
+    expect(fetch.mock.calls[0][0]).not.toContain('task_idle_minutes');
     fetch.mockResolvedValue(new Response('unavailable', { status: 503 }));
-    await expect(fetchAPIKeyTimeUsage({ start: '', end: '', apiKeyId: '' })).rejects.toMatchObject({ status: 503, message: 'api_key_time_usage_failed' });
+    await expect(fetchAPIKeyTimeUsage({ start: '', end: '', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false })).rejects.toMatchObject({ status: 503, message: 'api_key_time_usage_failed' });
   });
 });

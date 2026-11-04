@@ -139,6 +139,13 @@
   gap: 8px 10px;
 }
 
+.taskIdleFilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
 .filterLabel {
   color: var(--text-secondary);
   font-size: 12px;
@@ -269,6 +276,28 @@
   &[data-period='off'] {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  &[data-task-time='true'] {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+
+    &[data-period='work'],
+    &[data-period='off'] {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+}
+
+// Six metrics do not fit one row on tablets; mobile keeps its own two-column grid.
+@media (min-width: 769px) and (max-width: 1080px) {
+  .rangeSummary[data-period='all'][data-task-time='true'] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 18px;
+
+    .summaryMetric:nth-child(3n + 1) {
+      padding-left: 2px;
+      border-left: 0;
+    }
+  }
 }
 
 .summaryMetric {
@@ -318,8 +347,10 @@
 .summaryValue { font-size: 26px; }
 .durationValue { font-size: 21px; }
 
-.summaryMetric[data-range-duration='work'] .durationValue { color: var(--usage-work); }
-.summaryMetric[data-range-duration='off'] .durationValue { color: var(--usage-off); }
+.summaryMetric[data-range-duration='work'] .durationValue,
+.summaryMetric[data-range-task='work'] .durationValue { color: var(--usage-work); }
+.summaryMetric[data-range-duration='off'] .durationValue,
+.summaryMetric[data-range-task='off'] .durationValue { color: var(--usage-off); }
 
 .meta {
   display: flex;
@@ -768,6 +799,16 @@ thead .totalCol[aria-sort='descending'] .sortMark {
   overflow: hidden;
 }
 
+.subLine[data-metric='task'] {
+  align-self: flex-end;
+  overflow: hidden;
+
+  em {
+    font-size: 11px;
+    font-weight: 500;
+  }
+}
+
 .summaryStack > [data-figure='tokens'],
 .band > [data-figure='tokens'] {
   display: block;
@@ -974,12 +1015,14 @@ thead .totalCol[aria-sort='descending'] .sortMark {
     gap: 14px;
   }
 
-  .periodFilter {
+  .periodFilter,
+  .taskIdleFilter {
     width: 100%;
     gap: 8px;
   }
 
-  .periodPresets {
+  .periodPresets,
+  .taskIdlePresets {
     width: 100%;
 
     .preset { flex: 1 1 0; }
@@ -1018,10 +1061,17 @@ thead .totalCol[aria-sort='descending'] .sortMark {
 
   .rangeSummary,
   .rangeSummary[data-period='work'],
-  .rangeSummary[data-period='off'] {
+  .rangeSummary[data-period='off'],
+  .rangeSummary[data-task-time='true'],
+  .rangeSummary[data-task-time='true'][data-period='work'],
+  .rangeSummary[data-task-time='true'][data-period='off'] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 18px 0;
     padding-bottom: 16px;
+  }
+
+  .rangeSummary[data-task-time='false']:not([data-period='all']) .summaryMetric:last-child {
+    grid-column: 1 / -1;
   }
 
   .summaryMetric {
@@ -1033,8 +1083,6 @@ thead .totalCol[aria-sort='descending'] .sortMark {
       border-left: 0;
     }
   }
-
-  .rangeSummary:not([data-period='all']) .summaryMetric:last-child { grid-column: 1 / -1; }
 
   .summaryValue { font-size: 24px; }
   .durationValue { font-size: 19px; }

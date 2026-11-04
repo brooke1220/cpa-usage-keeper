@@ -4,8 +4,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APIKeyTimeUsagePage } from '../APIKeyTimeUsagePage';
+import { TaskTimeSettingsCard } from '@/components/usage/TaskTimeSettingsCard';
 import { fetchAPIKeyTimeUsage, fetchWorkHours } from '../api';
-import { TIME_USAGE_PERIOD_STORAGE_KEY, TIME_USAGE_RANGE_STORAGE_KEY } from '../model';
+import { TIME_USAGE_PERIOD_STORAGE_KEY, TIME_USAGE_RANGE_STORAGE_KEY, TIME_USAGE_TASK_IDLE_STORAGE_KEY, TIME_USAGE_TASK_TIME_STORAGE_KEY } from '../model';
 import { ApiError } from '@/lib/api';
 import { sampleReport } from './fixtures';
 import type { TimeUsageReport } from '../types';
@@ -21,7 +22,7 @@ let root: Root;
 let container: HTMLDivElement;
 const api = vi.mocked(fetchAPIKeyTimeUsage);
 const workHours = vi.mocked(fetchWorkHours);
-const weekQuery = { start: '2026-10-03', end: '2026-10-09', apiKeyId: '' };
+const weekQuery = { start: '2026-10-03', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false };
 const click = async (selector: string) => { await act(async () => container.querySelector<HTMLButtonElement>(selector)!.click()); };
 const setDate = async (selector: string, value: string) => {
   const input = container.querySelector<HTMLInputElement>(selector)!;
@@ -33,18 +34,97 @@ const setDate = async (selector: string, value: string) => {
   });
 };
 
+// Follow the same unmount/remount boundary as the real settings and usage tabs.
+const configureTaskTime = async (enabled: boolean) => {
+  await act(async () => root.render(<TaskTimeSettingsCard />));
+  const toggle = container.querySelector<HTMLInputElement>('[data-task-time-toggle]')!;
+  if (toggle.checked !== enabled) await click('[data-task-time-toggle]');
+  await act(async () => root.render(<APIKeyTimeUsagePage />));
+};
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-09T04:00:00Z'));
   localStorage.removeItem(TIME_USAGE_RANGE_STORAGE_KEY);
   localStorage.removeItem(TIME_USAGE_PERIOD_STORAGE_KEY);
+  localStorage.removeItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY); localStorage.removeItem(TIME_USAGE_TASK_TIME_STORAGE_KEY);
   api.mockReset().mockResolvedValue(sampleReport());
   workHours.mockReset().mockResolvedValue({ timezone: 'Asia/Shanghai', start: '09:00', end: '18:00', source: 'default' });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); localStorage.removeItem(TIME_USAGE_RANGE_STORAGE_KEY); localStorage.removeItem(TIME_USAGE_PERIOD_STORAGE_KEY); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); localStorage.removeItem(TIME_USAGE_RANGE_STORAGE_KEY); localStorage.removeItem(TIME_USAGE_PERIOD_STORAGE_KEY); localStorage.removeItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY); localStorage.removeItem(TIME_USAGE_TASK_TIME_STORAGE_KEY); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('API Key time usage page', () => {
+  it('defaults to the previous display and keeps the old summary sizes in every period', async () => {
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(api).toHaveBeenCalledWith(weekQuery, expect.any(AbortSignal));
+    expect(container.querySelector('[data-task-time-toggle]')).toBeNull();
+    expect(container.querySelector('[data-metric="task"], [data-range-task], [data-task-idle]')).toBeNull();
+    expect(container.querySelector('[data-range-summary]')?.children).toHaveLength(4);
+    expect(container.querySelector('[data-range-summary]')?.getAttribute('data-task-time')).toBe('false');
+    expect(container.querySelector('[data-day-rule]')?.textContent).toContain('api_key_time_usage.day_note:');
+    expect(container.textContent).not.toContain('api_key_time_usage.cell_order_tasks');
+    for (const period of ['work', 'off']) {
+      await click(`[data-period-filter="${period}"]`);
+      expect(container.querySelector('[data-range-summary]')?.children).toHaveLength(3);
+      expect(container.querySelector('[data-metric="task"], [data-range-task], [data-task-idle]')).toBeNull();
+    }
+    expect(api).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the settings switch and remembers the idle gap through refreshes and remounts', async () => {
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    await configureTaskTime(true);
+    expect(api).toHaveBeenLastCalledWith({ ...weekQuery, taskTimeEnabled: true }, expect.any(AbortSignal));
+    expect(container.querySelector('[data-range-summary]')?.children).toHaveLength(6);
+    expect(container.querySelector('[data-metric="task"]')).not.toBeNull();
+    expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('true');
+    await click('[data-task-idle="30"]');
+    await act(async () => root.render(<APIKeyTimeUsagePage refreshToken={1} />));
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-range-summary]')?.getAttribute('data-task-time')).toBe('true');
+    expect(api).toHaveBeenLastCalledWith({ ...weekQuery, taskTimeEnabled: true, taskIdleMinutes: 30 }, expect.any(AbortSignal));
+    await configureTaskTime(false);
+    expect(api).toHaveBeenLastCalledWith({ ...weekQuery, taskIdleMinutes: 30 }, expect.any(AbortSignal));
+    expect(container.querySelector('[data-metric="task"], [data-range-task], [data-task-idle]')).toBeNull();
+    expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('false');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-range-summary]')?.getAttribute('data-task-time')).toBe('false');
+    expect(container.querySelector('[data-metric="task"]')).toBeNull();
+    await configureTaskTime(true);
+    expect(container.querySelector('[data-task-idle="30"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('hides task content immediately and ignores a late enabled response after switching off', async () => {
+    localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    let resolveEnabled!: (report: TimeUsageReport) => void;
+    api.mockImplementationOnce(() => new Promise(resolve => { resolveEnabled = resolve; }));
+    await click('[data-task-idle="30"]');
+    const enabledSignal = api.mock.calls.at(-1)![1]!;
+    let resolveDisabled!: (report: TimeUsageReport) => void;
+    api.mockImplementationOnce(() => new Promise(resolve => { resolveDisabled = resolve; }));
+    await configureTaskTime(false);
+    expect(enabledSignal.aborted).toBe(true);
+    expect(container.querySelector('[data-metric="task"], [data-range-task], [data-task-idle]')).toBeNull();
+    await act(async () => resolveEnabled({ ...sampleReport(), task_idle_minutes: 30 }));
+    expect(container.querySelector('[data-metric="task"], [data-range-task], [data-task-idle]')).toBeNull();
+    await act(async () => resolveDisabled({ ...sampleReport(), task_time_enabled: false }));
+    expect(container.querySelector('[data-range-summary]')?.children).toHaveLength(4);
+    expect(container.querySelector('[data-metric="task"]')).toBeNull();
+  });
+
+  it('uses the old display when a stored switch value is invalid', async () => {
+    localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'invalid');
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-range-summary]')?.getAttribute('data-task-time')).toBe('false');
+    expect(api).toHaveBeenCalledWith(weekQuery, expect.any(AbortSignal));
+  });
+
   it.each([
     { period: 'work', hidden: 'off', column: 'daytime_tokens', total: '520', messages: '8', firstKey: '1', firstDayTokens: '280', latency: '5,001,000 ms' },
     { period: 'off', hidden: 'work', column: 'after_hours_tokens', total: '780', messages: '5', firstKey: '2', firstDayTokens: '120', latency: '1,000 ms' },
@@ -115,7 +195,7 @@ describe('API Key time usage page', () => {
   it('uses the previous statistical day before work starts', async () => {
     vi.setSystemTime(new Date('2026-10-11T23:00:00Z')); // 07:00 on Oct 12 in Shanghai.
     await act(async () => root.render(<APIKeyTimeUsagePage />));
-    expect(api).toHaveBeenCalledWith({ start: '2026-10-05', end: '2026-10-11', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenCalledWith({ start: '2026-10-05', end: '2026-10-11', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
     expect(container.querySelector<HTMLInputElement>('[data-range-end]')?.value).toBe('2026-10-11');
     expect(JSON.parse(localStorage.getItem(TIME_USAGE_RANGE_STORAGE_KEY) ?? '{}').end).toBe('2026-10-11');
   });
@@ -173,16 +253,56 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('tbody tr')?.getAttribute('data-time-usage-key')).toBe('2');
   });
 
+  it('shows task time after each cumulative time', async () => {
+    localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect([...container.querySelectorAll('[data-range-summary] > [data-range-duration], [data-range-summary] > [data-range-task]')]
+      .map(node => `${node.hasAttribute('data-range-task') ? 'task' : 'duration'}:${node.getAttribute('data-range-task') ?? node.getAttribute('data-range-duration')}`))
+      .toEqual(['duration:work', 'task:work', 'duration:off', 'task:off']);
+    expect(container.querySelector('[data-range-task="work"]')?.getAttribute('title')).toContain('6,000,000 ms');
+    expect(container.querySelector('[data-range-task="off"]')?.getAttribute('title')).toContain('90,000 ms');
+    expect(container.querySelector('[data-time-usage-key="1"] [data-key-total="daytime"] [data-metric="task"] strong')?.textContent).toBe('1h40m');
+    expect(container.querySelector('[data-time-usage-key="2"] [data-key-total="after_hours"] [data-metric="task"] strong')?.textContent).toBe('1m');
+    expect(container.querySelector('[data-time-usage-key="1"] [data-date="2026-10-01"] [data-metric="task"][data-period="work"]')).not.toBeNull();
+    const band = container.querySelector('tfoot [class*="band"][data-period="work"]')!;
+    expect(band.lastElementChild?.getAttribute('data-metric')).toBe('task');
+    expect(container.querySelector('[data-day-rule]')?.textContent).toContain('"idle":10');
+  });
+
+  it('reloads with the chosen idle gap and remembers it', async () => {
+    localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(container.querySelector('[data-task-idle="10"]')?.getAttribute('aria-pressed')).toBe('true');
+    api.mockResolvedValue({ ...sampleReport(), task_idle_minutes: 30 });
+    await click('[data-task-idle="30"]');
+    expect(api).toHaveBeenLastCalledWith({ ...weekQuery, taskIdleMinutes: 30, taskTimeEnabled: true }, expect.any(AbortSignal));
+    expect(container.querySelector('[data-task-idle="30"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-day-rule]')?.textContent).toContain('"idle":30');
+    expect(localStorage.getItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY)).toBe('30');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(api).toHaveBeenLastCalledWith({ ...weekQuery, taskIdleMinutes: 30, taskTimeEnabled: true }, expect.any(AbortSignal));
+  });
+
+  it('falls back to the default idle gap for an invalid saved value', async () => {
+    localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
+    localStorage.setItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY, '15');
+    await act(async () => root.render(<APIKeyTimeUsagePage />));
+    expect(api).toHaveBeenCalledWith({ ...weekQuery, taskTimeEnabled: true }, expect.any(AbortSignal));
+    expect(container.querySelector('[data-task-idle="10"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('computes the statistical day in the project time zone from the schedule', async () => {
     // 04:00 UTC is 00:00 in New York, before the 09:00 work start: the current statistical day is still Oct 8.
     workHours.mockResolvedValue({ timezone: 'America/New_York', start: '09:00', end: '18:00', source: 'default' });
     await act(async () => root.render(<APIKeyTimeUsagePage />));
-    expect(api).toHaveBeenCalledWith({ start: '2026-10-02', end: '2026-10-08', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenCalledWith({ start: '2026-10-02', end: '2026-10-08', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
   });
 
   it('notes usage from API keys that were never synced instead of hiding it', async () => {
     const data = sampleReport();
-    data.unattributed = { total_tokens: 1234, daytime_tokens: 1000, after_hours_tokens: 234, message_count: 3, daytime_message_count: 2, after_hours_message_count: 1, daytime_latency_ms: 0, after_hours_latency_ms: 0, daytime_latency_samples: 0, after_hours_latency_samples: 0 };
+    data.unattributed = { total_tokens: 1234, daytime_tokens: 1000, after_hours_tokens: 234, message_count: 3, daytime_message_count: 2, after_hours_message_count: 1, daytime_latency_ms: 0, after_hours_latency_ms: 0, daytime_latency_samples: 0, after_hours_latency_samples: 0, daytime_task_ms: 0, after_hours_task_ms: 0 };
     api.mockResolvedValue(data);
     await act(async () => root.render(<APIKeyTimeUsagePage />));
     expect(container.querySelector('[data-unattributed-note]')?.textContent).toContain('api_key_time_usage.unattributed_note');
@@ -270,19 +390,19 @@ describe('API Key time usage page', () => {
   it('changes the range from presets or dates and keeps that range on refresh', async () => {
     await act(async () => root.render(<APIKeyTimeUsagePage />));
     await click('[data-range-preset="30d"]');
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
     expect(container.querySelector('[data-range-preset="30d"]')?.getAttribute('aria-pressed')).toBe('true');
     await click('[data-range-preset="today"]');
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-09', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-09', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
     await setDate('[data-range-start]', '2026-10-05');
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-05', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-05', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
     expect(container.querySelector('[data-range-preset="7d"]')?.getAttribute('aria-pressed')).toBe('false');
     await act(async () => root.render(<APIKeyTimeUsagePage refreshToken={1} />));
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-05', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-05', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
     await act(async () => root.unmount());
     root = createRoot(container);
     await act(async () => root.render(<APIKeyTimeUsagePage />));
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-05', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-10-05', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
   });
 
   it('does not query an invalid hand-edited range and ignores corrupt storage', async () => {
@@ -318,11 +438,11 @@ describe('API Key time usage page', () => {
     api.mockRejectedValueOnce(new ApiError('invalid_api_key_time_usage_query', 400));
     await click('[data-range-preset="30d"]');
     expect(api).toHaveBeenCalledTimes(2);
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('api_key_time_usage.invalid_range');
     await click('[role="alert"] button');
     expect(api).toHaveBeenCalledTimes(3);
-    expect(api).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-10-09', apiKeyId: '' }, expect.any(AbortSignal));
+    expect(api).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-10-09', apiKeyId: '', taskIdleMinutes: 10, taskTimeEnabled: false }, expect.any(AbortSignal));
   });
 
   it('returns to authentication on 401 without querying another range', async () => {

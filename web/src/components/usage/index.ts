@@ -4,6 +4,7 @@ export { OverviewRealtimePanel } from './OverviewRealtimePanel';
 export { AnalysisPanel } from './analysis';
 export { ApiKeySettingsCard } from './ApiKeySettingsCard';
 export { WorkHoursSettingsCard } from './WorkHoursSettingsCard';
+export { TaskTimeSettingsCard } from './TaskTimeSettingsCard';
 export { SessionSettingsCard } from './SessionSettingsCard';
 export { AiProviderCredentialsSection, CredentialsSection, CredentialDetailDrawer, CredentialProviderFilterBar, useCredentialsTabData } from './credentials';
 export type { CredentialDetailSelection } from './credentials';

@@ -9,6 +9,8 @@ const zeroMetrics = {
   after_hours_latency_ms: 0,
   daytime_latency_samples: 0,
   after_hours_latency_samples: 0,
+  daytime_task_ms: 0,
+  after_hours_task_ms: 0,
 } satisfies Omit<TimeUsageTotals, 'total_tokens' | 'daytime_tokens' | 'after_hours_tokens'>;
 
 const day = (date: string, total: number, daytime: number, today = false): TimeUsageDay => ({
@@ -30,7 +32,7 @@ export const sampleReport = (): TimeUsageReport => {
   ));
   return {
     timezone: 'Asia/Shanghai', daytime_start: '09:00', daytime_end: '18:00', start_date: '2026-10-01', end_date: '2026-10-09',
-    min_date: '2026-07-12', max_date: '2026-10-09', generated_at: '2026-10-09T12:00:00+08:00', complete_days: 8, has_records: true,
+    min_date: '2026-07-12', max_date: '2026-10-09', task_idle_minutes: 10, task_time_enabled: true, generated_at: '2026-10-09T12:00:00+08:00', complete_days: 8, has_records: true,
     keys: [
       { id: '1', key_alias: 'Team Alpha', display_key: 'sk-*********123456', display_name: 'Team Alpha', avatar_id: 12, is_deleted: false },
       { id: '2', key_alias: 'Team Beta', display_key: 'sk-*********654321', display_name: 'Team Beta', avatar_id: 2, is_deleted: true },
@@ -38,12 +40,13 @@ export const sampleReport = (): TimeUsageReport => {
     summary: {
       total_tokens: 900, daytime_tokens: 600, after_hours_tokens: 300,
       message_count: 13, daytime_message_count: 8, after_hours_message_count: 5, daytime_latency_ms: 5_001_000, after_hours_latency_ms: 1_000, daytime_latency_samples: 2, after_hours_latency_samples: 1,
+      daytime_task_ms: 6_000_000, after_hours_task_ms: 90_000,
       daily_average: 75, daytime_daily_average: 52.5, after_hours_daily_average: 22.5, daytime_share: 2 / 3, after_hours_share: 1 / 3,
     },
     daily,
     key_summaries: [
-      { key: { id: '1', key_alias: 'Team Alpha', display_key: 'sk-*********123456', display_name: 'Team Alpha', avatar_id: 12, is_deleted: false }, total_tokens: 600, daytime_tokens: 420, after_hours_tokens: 180, message_count: 4, daytime_message_count: 3, after_hours_message_count: 1, daytime_latency_ms: 5_000_000, after_hours_latency_ms: 0, daytime_latency_samples: 1, after_hours_latency_samples: 0, daily_average: 50, daytime_daily_average: 35, after_hours_daily_average: 15, daytime_share: 0.7, after_hours_share: 0.3, daily: split(2, 3) },
-      { key: { id: '2', key_alias: 'Team Beta', display_key: 'sk-*********654321', display_name: 'Team Beta', avatar_id: 2, is_deleted: true }, total_tokens: 300, daytime_tokens: 180, after_hours_tokens: 120, message_count: 9, daytime_message_count: 5, after_hours_message_count: 4, daytime_latency_ms: 1_000, after_hours_latency_ms: 1_000, daytime_latency_samples: 1, after_hours_latency_samples: 1, daily_average: 25, daytime_daily_average: 17.5, after_hours_daily_average: 7.5, daytime_share: 0.6, after_hours_share: 0.4, daily: split(1, 3) },
+      { key: { id: '1', key_alias: 'Team Alpha', display_key: 'sk-*********123456', display_name: 'Team Alpha', avatar_id: 12, is_deleted: false }, total_tokens: 600, daytime_tokens: 420, after_hours_tokens: 180, message_count: 4, daytime_message_count: 3, after_hours_message_count: 1, daytime_latency_ms: 5_000_000, after_hours_latency_ms: 0, daytime_latency_samples: 1, after_hours_latency_samples: 0, daytime_task_ms: 6_000_000, after_hours_task_ms: 0, daily_average: 50, daytime_daily_average: 35, after_hours_daily_average: 15, daytime_share: 0.7, after_hours_share: 0.3, daily: split(2, 3) },
+      { key: { id: '2', key_alias: 'Team Beta', display_key: 'sk-*********654321', display_name: 'Team Beta', avatar_id: 2, is_deleted: true }, total_tokens: 300, daytime_tokens: 180, after_hours_tokens: 120, message_count: 9, daytime_message_count: 5, after_hours_message_count: 4, daytime_latency_ms: 1_000, after_hours_latency_ms: 1_000, daytime_latency_samples: 1, after_hours_latency_samples: 1, daytime_task_ms: 0, after_hours_task_ms: 90_000, daily_average: 25, daytime_daily_average: 17.5, after_hours_daily_average: 7.5, daytime_share: 0.6, after_hours_share: 0.4, daily: split(1, 3) },
     ],
   };
 };

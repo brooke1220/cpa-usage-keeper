@@ -5,9 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import type { UsageEventRequestLogResponse, UsageEventsResponse } from '@/lib/types';
+import { sampleReport } from '@/features/api-key-time-usage/test/fixtures';
+import { TIME_USAGE_TASK_TIME_STORAGE_KEY } from '@/features/api-key-time-usage/model';
 
 const api = vi.hoisted(() => ({
   fetchUsageEventRequestLog: vi.fn(),
+  fetchAPIKeyTimeUsage: vi.fn(),
 }));
 
 vi.mock('react-chartjs-2', () => ({
@@ -21,6 +24,7 @@ vi.mock('react-chartjs-2', () => ({
 vi.mock('@/features/api-key-time-usage/api', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/features/api-key-time-usage/api')>(),
   fetchWorkHours: async () => ({ timezone: 'UTC', start: '09:00', end: '18:00', source: 'default' }),
+  fetchAPIKeyTimeUsage: api.fetchAPIKeyTimeUsage,
 }));
 
 vi.mock('@/lib/api', async (importOriginal) => ({
@@ -85,6 +89,7 @@ describe('UsagePage runtime behavior', () => {
     localStorage.clear();
     window.history.replaceState(null, '', '/request-events');
     api.fetchUsageEventRequestLog.mockReset();
+    api.fetchAPIKeyTimeUsage.mockReset().mockResolvedValue(sampleReport());
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -120,6 +125,35 @@ describe('UsagePage runtime behavior', () => {
     expect(window.location.pathname).toBe('/settings');
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
     expect(networkFetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the task-time switch in settings and applies both choices on returning to usage', async () => {
+    window.history.replaceState(null, '', '/settings');
+    await render();
+    const navigate = async (path: string) => {
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-dashboard-page-trigger]')!.click());
+      await act(async () => container.querySelector<HTMLAnchorElement>(`[data-dashboard-page-menu] a[href$="${path}"]`)!.click());
+      expect(window.location.pathname).toBe(path);
+    };
+    const toggle = container.querySelector<HTMLInputElement>('[data-task-time-settings] [role="switch"]')!;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.closest('label')?.textContent).toBe('Show task time (merge sessions)');
+    expect(document.getElementById(toggle.getAttribute('aria-describedby')!)?.textContent).toContain('Disable to restore');
+    expect(api.fetchAPIKeyTimeUsage).not.toHaveBeenCalled();
+    await act(async () => toggle.click());
+    expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('true');
+    await navigate('/api-key-usage');
+    expect(api.fetchAPIKeyTimeUsage).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeEnabled: true }), expect.any(AbortSignal));
+    expect(container.querySelector('[data-task-time-toggle]')).toBeNull();
+    expect(container.querySelector('[data-range-task]')).not.toBeNull();
+
+    await navigate('/settings');
+    expect(container.querySelector<HTMLInputElement>('[data-task-time-toggle]')?.checked).toBe(true);
+    await act(async () => container.querySelector<HTMLInputElement>('[data-task-time-toggle]')!.click());
+    expect(localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY)).toBe('false');
+    await navigate('/api-key-usage');
+    expect(api.fetchAPIKeyTimeUsage).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeEnabled: false }), expect.any(AbortSignal));
+    expect(container.querySelector('[data-task-time-toggle], [data-range-task], [data-task-idle], [data-metric="task"]')).toBeNull();
   });
 
   const openPendingRequestLog = async () => {

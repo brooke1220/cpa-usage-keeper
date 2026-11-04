@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addDateDays, addMonths, alignTimeUsageDays, formatUsageMonth, isWeekendDate, monthToDateRange, parseStoredTimeUsageRange, presetDates, previousMonthToDateRange, resolveTimeZone, selectableUsageMonths, sortTimeUsageKeys, statisticalDate, statisticalWeekday, timeUsageAvatarID, usageMonthRange, validTimeUsageDates, validWorkHours, zonedDate } from '../model';
 import { sampleReport } from './fixtures';
 import { apiKeyTimeUsageMessages } from '../messages';
+import type { TimeUsageDay } from '../types';
 
 describe('API Key time usage calendar and sorting', () => {
   it('uses the project time zone calendar even around UTC midnight', () => {
@@ -75,11 +76,16 @@ describe('API Key time usage calendar and sorting', () => {
     expect(isWeekendDate('2026-10-10')).toBe(true);
     expect(isWeekendDate('2026-10-12')).toBe(false);
     const calendar = [{ date: '2026-10-01', is_today: false }, { date: '2026-10-02', is_today: true }];
-    const metrics = { message_count: 0, daytime_message_count: 0, after_hours_message_count: 0, daytime_latency_ms: 0, after_hours_latency_ms: 0, daytime_latency_samples: 0, after_hours_latency_samples: 0 };
-    expect(alignTimeUsageDays(calendar, [{ date: '2026-10-02T00:00:00Z', is_today: false, total_tokens: 3, daytime_tokens: 2, after_hours_tokens: 1, ...metrics }])).toEqual([
+    const metrics = { message_count: 0, daytime_message_count: 0, after_hours_message_count: 0, daytime_latency_ms: 0, after_hours_latency_ms: 0, daytime_latency_samples: 0, after_hours_latency_samples: 0, daytime_task_ms: 0, after_hours_task_ms: 0 };
+    expect(alignTimeUsageDays(calendar, [{ date: '2026-10-02T00:00:00Z', is_today: false, total_tokens: 3, daytime_tokens: 2, after_hours_tokens: 1, ...metrics, daytime_task_ms: 60_000, after_hours_task_ms: 30_000 }])).toEqual([
       { date: '2026-10-01', is_today: false, total_tokens: 0, daytime_tokens: 0, after_hours_tokens: 0, ...metrics },
-      { date: '2026-10-02', is_today: true, total_tokens: 3, daytime_tokens: 2, after_hours_tokens: 1, ...metrics },
+      { date: '2026-10-02', is_today: true, total_tokens: 3, daytime_tokens: 2, after_hours_tokens: 1, ...metrics, daytime_task_ms: 60_000, after_hours_task_ms: 30_000 },
     ]);
+  });
+
+  it('fills task time with zero when an older server omits it', () => {
+    const legacy = { date: '2026-10-01', is_today: false, total_tokens: 1, daytime_tokens: 1, after_hours_tokens: 0, message_count: 1, daytime_message_count: 1, after_hours_message_count: 0, daytime_latency_ms: 0, after_hours_latency_ms: 0, daytime_latency_samples: 0, after_hours_latency_samples: 0 } as TimeUsageDay;
+    expect(alignTimeUsageDays([{ date: '2026-10-01', is_today: false }], [legacy])[0]).toMatchObject({ daytime_task_ms: 0, after_hours_task_ms: 0 });
   });
 
   it('accepts only a same-day HH:mm work window on 15-minute steps, including 24:00', () => {

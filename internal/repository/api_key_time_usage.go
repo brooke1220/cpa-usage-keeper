@@ -30,6 +30,10 @@ type APIKeyTimeUsageDay struct {
 	AfterHoursLatencyMS      int64 `gorm:"column:after_hours_latency_ms"`
 	DaytimeLatencySamples    int64 `gorm:"column:daytime_latency_samples"`
 	AfterHoursLatencySamples int64 `gorm:"column:after_hours_latency_samples"`
+	// DaytimeTaskMS and AfterHoursTaskMS are never read from SQL; the service
+	// fills them from the streamed task-day results.
+	DaytimeTaskMS    int64 `gorm:"-"`
+	AfterHoursTaskMS int64 `gorm:"-"`
 }
 
 // Date returns the statistical-day label as YYYY-MM-DD.

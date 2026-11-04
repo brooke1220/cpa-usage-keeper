@@ -42,6 +42,7 @@ type apiKeyTimeUsageService struct {
 	clock    *workhours.Clock
 	now      func() time.Time
 	location *time.Location
+	tasks    apiKeyTaskCache
 }
 
 func NewAPIKeyTimeUsageService(db *gorm.DB, options APIKeyTimeUsageOptions) (APIKeyTimeUsageProvider, error) {
@@ -68,7 +69,7 @@ func NewAPIKeyTimeUsageService(db *gorm.DB, options APIKeyTimeUsageOptions) (API
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	return &apiKeyTimeUsageService{db: db, clock: clock, now: options.Now, location: options.Location}, nil
+	return &apiKeyTimeUsageService{db: db, clock: clock, now: options.Now, location: options.Location, tasks: apiKeyTaskCache{gate: make(chan struct{}, 1)}}, nil
 }
 
 func (s *apiKeyTimeUsageService) projectLocation() *time.Location {
@@ -115,6 +116,18 @@ func (s *apiKeyTimeUsageService) GetAPIKeyTimeUsage(ctx context.Context, query d
 			return nil, ErrInvalidAPIKeyTimeUsageQuery
 		}
 	}
+	if query.TaskTimeEnabled != "" && query.TaskTimeEnabled != "true" && query.TaskTimeEnabled != "false" {
+		return nil, ErrInvalidAPIKeyTimeUsageQuery
+	}
+	taskTimeEnabled := query.TaskTimeEnabled == "true"
+	idleMinutes := apikeytime.DefaultTaskIdleMinutes
+	if query.TaskIdleMinutes != "" {
+		var err error
+		idleMinutes, err = strconv.Atoi(query.TaskIdleMinutes)
+		if err != nil || !apikeytime.ValidTaskIdleMinutes(idleMinutes) || strconv.Itoa(idleMinutes) != query.TaskIdleMinutes {
+			return nil, ErrInvalidAPIKeyTimeUsageQuery
+		}
+	}
 	// Labels are exact, so a one-day pad only guards zone transitions at the edges.
 	window := repository.APIKeyTimeUsageWindow{
 		Start:     timeutil.ClockOnDate(start, workStart, location).Add(-24 * time.Hour),
@@ -127,11 +140,23 @@ func (s *apiKeyTimeUsageService) GetAPIKeyTimeUsage(ctx context.Context, query d
 	if err != nil {
 		return nil, err
 	}
+	if taskTimeEnabled {
+		// Cache compact totals for all keys and idle options; key selection is applied
+		// below, after resolving the complete retained session ancestry.
+		tasks, err := s.taskDays(ctx, window, idleMinutes)
+		if err != nil {
+			return nil, err
+		}
+		// Task rows carry only task time; the loop below attributes them like token rows.
+		for _, task := range tasks {
+			rows = append(rows, repository.APIKeyTimeUsageDay{APIKeyID: task.APIKeyID, StatDay: task.StatDay, DaytimeTaskMS: task.DaytimeMS, AfterHoursTaskMS: task.AfterHoursMS})
+		}
+	}
 	report := &dto.APIKeyTimeUsageReport{
 		Timezone:     location.String(),
 		DaytimeStart: hours.Start, DaytimeEnd: hours.End,
 		StartDate: start.Format(time.DateOnly), EndDate: last.Format(time.DateOnly), MinDate: minDate.Format(time.DateOnly), MaxDate: today.Format(time.DateOnly),
-		APIKeyID: query.APIKeyID, GeneratedAt: now,
+		APIKeyID: query.APIKeyID, TaskTimeEnabled: taskTimeEnabled, TaskIdleMinutes: idleMinutes, GeneratedAt: now,
 		Keys: make([]dto.APIKeyTimeUsageKey, 0), Daily: make([]dto.APIKeyTimeUsageDaily, 0), KeySummaries: make([]dto.APIKeyTimeUsageKeySummary, 0),
 	}
 	days := make(map[string]int)
@@ -191,6 +216,7 @@ func (s *apiKeyTimeUsageService) GetAPIKeyTimeUsage(ctx context.Context, query d
 			MessageCount: row.MessageCount, DaytimeMessageCount: row.DaytimeMessageCount, AfterHoursMessageCount: row.AfterHoursMessageCount,
 			DaytimeLatencyMS: row.DaytimeLatencyMS, AfterHoursLatencyMS: row.AfterHoursLatencyMS,
 			DaytimeLatencySamples: row.DaytimeLatencySamples, AfterHoursLatencySamples: row.AfterHoursLatencySamples,
+			DaytimeTaskMS: row.DaytimeTaskMS, AfterHoursTaskMS: row.AfterHoursTaskMS,
 		}
 		if row.APIKeyID == 0 {
 			// Usage from keys that were never synced is reported separately so the table total stays the sum of its rows.
@@ -234,6 +260,8 @@ func addAPIKeyTimeUsage(to *dto.APIKeyTimeUsageTotals, from dto.APIKeyTimeUsageT
 	to.AfterHoursLatencyMS += from.AfterHoursLatencyMS
 	to.DaytimeLatencySamples += from.DaytimeLatencySamples
 	to.AfterHoursLatencySamples += from.AfterHoursLatencySamples
+	to.DaytimeTaskMS += from.DaytimeTaskMS
+	to.AfterHoursTaskMS += from.AfterHoursTaskMS
 }
 
 func finishAPIKeyTimeUsage(stats *dto.APIKeyTimeUsageStats, completed dto.APIKeyTimeUsageTotals, days int) {

@@ -33,6 +33,7 @@ import {
   AnalysisPanel,
   ApiKeySettingsCard,
   WorkHoursSettingsCard,
+  TaskTimeSettingsCard,
   SessionSettingsCard,
   CredentialsSection,
   AiProviderCredentialsSection,
@@ -2558,6 +2559,7 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
             {activeTab === 'settings' && (
               <div className={styles.settingsSections}>
                 <WorkHoursSettingsCard refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} />
+                <TaskTimeSettingsCard />
                 <PushIngestSettingsCard ingestStatus={showIngestPanel ? status?.ingest : undefined} refreshToken={workHoursRefresh} onAuthRequired={onAuthRequired} onNotice={showTopNotice} onSettingsChanged={refreshStatus} />
                 <SessionSettingsCard
                   sessions={authSessions}

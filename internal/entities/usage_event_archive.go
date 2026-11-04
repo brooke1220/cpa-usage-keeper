@@ -6,9 +6,9 @@ import "time"
 const UsageEventStorageColumns = "id, event_key, api_group_key, is_native_key, access_provider, provider, endpoint, auth_type, request_id, execution_id, trace_id, session_id, parent_session_id, node_kind, is_fork, is_compaction, client_ip, x_forwarded_for, user_agent, model, model_alias, response_model, reasoning_effort, service_tier, effective_service_tier, response_service_tier, executor_type, timestamp, source, auth_index, failed, status_code, generate, stream, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, cost_usd, cost_available, created_at, source_id, delivery_event_id"
 
 // UsageEventArchive 保存已经离开 hot usage_events 的原始事件，默认永久保留，可配置清理期限。
-// 字段必须与 UsageEvent 的持久化列保持一致，但 archive 不承担在线查询，因此不复制二级索引。
+// 字段必须与 UsageEvent 的持久化列保持一致，archive 仅保留任务祖先查询所需的部分索引，不复制其余在线索引。
 type UsageEventArchive struct {
-	ID                   int64 `gorm:"primaryKey;autoIncrement:false"`
+	ID                   int64 `gorm:"primaryKey;autoIncrement:false;index:idx_usage_events_archive_task_parent,priority:3"`
 	EventKey             string
 	APIGroupKey          string
 	IsNativeKey          *bool   `gorm:"column:is_native_key"`
@@ -19,8 +19,8 @@ type UsageEventArchive struct {
 	RequestID            string  `gorm:"column:request_id"`
 	ExecutionID          *string `gorm:"column:execution_id"`
 	TraceID              *string `gorm:"column:trace_id"`
-	SessionID            string  `gorm:"column:session_id"`
-	ParentSessionID      *string `gorm:"column:parent_session_id"`
+	SessionID            string  `gorm:"column:session_id;index:idx_usage_events_archive_task_parent,priority:1,where:parent_session_id IS NOT NULL AND parent_session_id <> '' AND session_id <> ''"`
+	ParentSessionID      *string `gorm:"column:parent_session_id;index:idx_usage_events_archive_task_parent,priority:2"`
 	NodeKind             *string `gorm:"column:node_kind"`
 	IsFork               *bool   `gorm:"column:is_fork"`
 	IsCompaction         *bool   `gorm:"column:is_compaction"`

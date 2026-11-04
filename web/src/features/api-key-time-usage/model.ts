@@ -93,6 +93,40 @@ export const validTimeUsageDates = (start: string, end: string, today: string): 
 };
 export const TIME_USAGE_RANGE_STORAGE_KEY = 'api-key-time-usage-range';
 export const TIME_USAGE_PERIOD_STORAGE_KEY = 'api-key-time-usage-period';
+export const TIME_USAGE_TASK_IDLE_STORAGE_KEY = 'api-key-time-usage-task-idle';
+export const TIME_USAGE_TASK_TIME_STORAGE_KEY = 'api-key-time-usage-task-time-enabled';
+export const readStoredTaskTimeEnabled = (): boolean => {
+  try {
+    return typeof window !== 'undefined' && window.localStorage.getItem(TIME_USAGE_TASK_TIME_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+export const writeStoredTaskTimeEnabled = (enabled: boolean) => {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, String(enabled));
+  } catch {
+    // An unavailable preference store must not block switching the display.
+  }
+};
+// Must match apikeytime.TaskIdleMinuteOptions; the server rejects other values.
+export const TASK_IDLE_MINUTE_OPTIONS = [5, 10, 30, 60] as const;
+export const DEFAULT_TASK_IDLE_MINUTES = 10;
+export const readStoredTaskIdleMinutes = (): number => {
+  try {
+    const value = Number(typeof window === 'undefined' ? null : window.localStorage.getItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY));
+    return (TASK_IDLE_MINUTE_OPTIONS as readonly number[]).includes(value) ? value : DEFAULT_TASK_IDLE_MINUTES;
+  } catch {
+    return DEFAULT_TASK_IDLE_MINUTES;
+  }
+};
+export const writeStoredTaskIdleMinutes = (minutes: number) => {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(TIME_USAGE_TASK_IDLE_STORAGE_KEY, String(minutes));
+  } catch {
+    // An unavailable preference store must not block changing the idle gap.
+  }
+};
 export const readStoredTimeUsagePeriod = (): TimeUsagePeriod => {
   try {
     const value = typeof window === 'undefined' ? null : window.localStorage.getItem(TIME_USAGE_PERIOD_STORAGE_KEY);
@@ -166,6 +200,7 @@ const usageDate = (value: string | undefined) => value?.slice(0, 10) ?? '';
 const emptyTotals = (): TimeUsageTotals => ({
   total_tokens: 0, daytime_tokens: 0, after_hours_tokens: 0, message_count: 0, daytime_message_count: 0, after_hours_message_count: 0,
   daytime_latency_ms: 0, after_hours_latency_ms: 0, daytime_latency_samples: 0, after_hours_latency_samples: 0,
+  daytime_task_ms: 0, after_hours_task_ms: 0,
 });
 export const alignTimeUsageDays = (calendar: readonly Pick<TimeUsageDay, 'date' | 'is_today'>[], daily: readonly TimeUsageDay[] | undefined): TimeUsageDay[] => {
   const rows = daily ?? [];
@@ -189,6 +224,8 @@ export const alignTimeUsageDays = (calendar: readonly Pick<TimeUsageDay, 'date' 
       after_hours_latency_ms: matched.after_hours_latency_ms ?? 0,
       daytime_latency_samples: matched.daytime_latency_samples ?? 0,
       after_hours_latency_samples: matched.after_hours_latency_samples ?? 0,
+      daytime_task_ms: matched.daytime_task_ms ?? 0,
+      after_hours_task_ms: matched.after_hours_task_ms ?? 0,
     };
   });
 };

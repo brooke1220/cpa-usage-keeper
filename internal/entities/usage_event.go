@@ -7,7 +7,7 @@ import (
 
 // UsageEvent 是落库后的单条 usage 请求事件实体。
 type UsageEvent struct {
-	ID                   int64 `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3;index:idx_usage_events_auth_index_timestamp_id,priority:3;index:idx_usage_events_source_id_timestamp_id,priority:3"`
+	ID                   int64 `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3;index:idx_usage_events_auth_index_timestamp_id,priority:3;index:idx_usage_events_source_id_timestamp_id,priority:3;index:idx_usage_events_task_parent,priority:3"`
 	EventKey             string
 	APIGroupKey          string    `gorm:"index:idx_usage_events_api_group_key_timestamp,priority:1"`
 	IsNativeKey          *bool     `gorm:"column:is_native_key"`
@@ -18,8 +18,8 @@ type UsageEvent struct {
 	RequestID            string    `gorm:"column:request_id"`
 	ExecutionID          *string   `gorm:"column:execution_id"`
 	TraceID              *string   `gorm:"column:trace_id"`
-	SessionID            string    `gorm:"column:session_id"`
-	ParentSessionID      *string   `gorm:"column:parent_session_id"`
+	SessionID            string    `gorm:"column:session_id;index:idx_usage_events_task_parent,priority:1,where:parent_session_id IS NOT NULL AND parent_session_id <> '' AND session_id <> ''"`
+	ParentSessionID      *string   `gorm:"column:parent_session_id;index:idx_usage_events_task_parent,priority:2"`
 	NodeKind             *string   `gorm:"column:node_kind"`
 	IsFork               *bool     `gorm:"column:is_fork"`
 	IsCompaction         *bool     `gorm:"column:is_compaction"`

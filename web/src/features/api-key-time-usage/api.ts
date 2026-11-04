@@ -2,7 +2,8 @@ import { ApiError, apiFetch, apiPath } from '@/lib/api';
 import type { TimeUsageQuery, TimeUsageReport } from './types';
 
 export async function fetchAPIKeyTimeUsage(query: TimeUsageQuery, signal?: AbortSignal): Promise<TimeUsageReport> {
-  const params = new URLSearchParams({ start_date: query.start, end_date: query.end });
+  const params = new URLSearchParams({ start_date: query.start, end_date: query.end, task_time_enabled: String(query.taskTimeEnabled) });
+  if (query.taskTimeEnabled) params.set('task_idle_minutes', String(query.taskIdleMinutes));
   if (query.apiKeyId) params.set('api_key_id', query.apiKeyId);
   const response = await apiFetch(apiPath(`/usage/api-key-time-usage?${params}`), { signal, credentials: 'include', cache: 'no-store' });
   if (!response.ok) {

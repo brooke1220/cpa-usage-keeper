@@ -17,6 +17,9 @@ export interface TimeUsageTotals {
   after_hours_latency_ms: number;
   daytime_latency_samples: number;
   after_hours_latency_samples: number;
+  /** Estimated task wall time: request time plus idle gaps within task_idle_minutes. */
+  daytime_task_ms: number;
+  after_hours_task_ms: number;
 }
 export interface TimeUsageStats extends TimeUsageTotals {
   daily_average: number | null;
@@ -40,6 +43,9 @@ export interface TimeUsageReport {
   min_date: string;
   max_date: string;
   api_key_id?: string;
+  /** Idle gap in minutes used for the task-duration fields. */
+  task_idle_minutes?: number;
+  task_time_enabled?: boolean;
   generated_at: string;
   complete_days: number;
   has_records: boolean;
@@ -50,7 +56,7 @@ export interface TimeUsageReport {
   daily: TimeUsageDay[];
   key_summaries: TimeUsageKeySummary[];
 }
-export interface TimeUsageQuery { start: string; end: string; apiKeyId: string }
+export interface TimeUsageQuery { start: string; end: string; apiKeyId: string; taskIdleMinutes: number; taskTimeEnabled: boolean }
 export type TimeUsagePeriod = 'all' | 'work' | 'off';
 export type TimeUsagePreset = 'today' | 'yesterday' | '7d' | '30d' | 'custom';
 export type TimeUsageSort = 'total_tokens' | 'daily_average' | 'daytime_tokens' | 'after_hours_tokens' | 'after_hours_share' | 'message_count' | 'request_duration';

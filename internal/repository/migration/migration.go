@@ -342,6 +342,7 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationPushUsageIdentityObservedAt, run: pushUsageIdentityObservedAtMigration},
 		{version: migrationUsageEventSourceIDIndex, run: usageEventSourceIDIndexMigration},
 		{version: migrationAddPluginAPIKeySources, run: addPluginAPIKeySourcesMigration},
+		{version: "20261104_api_key_task_parent_indexes", run: apiKeyTaskParentIndexesMigration},
 	}
 }
 

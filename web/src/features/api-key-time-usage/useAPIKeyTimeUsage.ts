@@ -10,8 +10,8 @@ interface State {
   error: Error | null;
 }
 export function useAPIKeyTimeUsage(query: TimeUsageQuery, valid: boolean, refresh: string, onAuthRequired?: () => void) {
-  const { start, end, apiKeyId } = query;
-  const request = JSON.stringify([start, end, apiKeyId, refresh]);
+  const { start, end, apiKeyId, taskIdleMinutes, taskTimeEnabled } = query;
+  const request = JSON.stringify([start, end, apiKeyId, taskIdleMinutes, taskTimeEnabled, refresh]);
   const [state, setState] = useState<State>({ request: '', loading: true, data: null, error: null });
   useEffect(() => {
     if (!valid) return;
@@ -21,7 +21,7 @@ export function useAPIKeyTimeUsage(query: TimeUsageQuery, valid: boolean, refres
       // range never reaches here, and a rejected range is not retried automatically.
       setState(previous => ({ request, loading: true, data: previous.data, error: null }));
       try {
-        const data = await fetchAPIKeyTimeUsage({ start, end, apiKeyId }, controller.signal);
+        const data = await fetchAPIKeyTimeUsage({ start, end, apiKeyId, taskIdleMinutes, taskTimeEnabled }, controller.signal);
         if (controller.signal.aborted) return;
         setState({ request, loading: false, data, error: null });
       } catch (error) {
@@ -32,7 +32,7 @@ export function useAPIKeyTimeUsage(query: TimeUsageQuery, valid: boolean, refres
     };
     void load();
     return () => controller.abort();
-  }, [apiKeyId, end, onAuthRequired, request, start, valid]);
+  }, [apiKeyId, end, onAuthRequired, request, start, taskIdleMinutes, taskTimeEnabled, valid]);
   const current = valid && request === state.request;
   return { data: state.data, error: current ? state.error : null, loading: valid && (!current || state.loading) };
 }

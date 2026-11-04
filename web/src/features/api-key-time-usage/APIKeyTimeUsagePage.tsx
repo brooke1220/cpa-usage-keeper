@@ -11,14 +11,18 @@ import {
   alignTimeUsageDays,
   isWeekendDate,
   presetDates,
+  readStoredTaskIdleMinutes,
+  readStoredTaskTimeEnabled,
   readStoredTimeUsagePeriod,
   readStoredTimeUsageRange,
   resolveTimeZone,
   sortTimeUsageKeys,
   statisticalDate,
   statisticalWeekday,
+  TASK_IDLE_MINUTE_OPTIONS,
   timeUsageAvatarID,
   validTimeUsageDates,
+  writeStoredTaskIdleMinutes,
   writeStoredTimeUsagePeriod,
   writeStoredTimeUsageRange,
 } from './model';
@@ -91,6 +95,7 @@ function compactDuration(value: number, locale: string) {
 const countOf = (row: TimeUsageTotals, period: TimeUsagePeriod = 'all') => (period === 'work' ? row.daytime_message_count : period === 'off' ? row.after_hours_message_count : row.message_count) ?? 0;
 const latencyOf = (row: TimeUsageTotals, period: 'work' | 'off') => period === 'work' ? (row.daytime_latency_ms ?? 0) : (row.after_hours_latency_ms ?? 0);
 const samplesOf = (row: TimeUsageTotals, period: 'work' | 'off') => period === 'work' ? (row.daytime_latency_samples ?? 0) : (row.after_hours_latency_samples ?? 0);
+const taskOf = (row: TimeUsageTotals, period: 'work' | 'off') => period === 'work' ? (row.daytime_task_ms ?? 0) : (row.after_hours_task_ms ?? 0);
 
 function IconCalendar() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -127,6 +132,15 @@ function SubLine({ metric, period, label, value, title, plain = false }: { metri
   const hint = title && title !== value ? `${label} · ${title}` : `${label} ${value}`;
   return <span className={styles.subLine} data-metric={metric} data-period={period} title={hint} aria-label={hint}>
     {!plain && <em aria-hidden="true">{metric === 'messages' ? <IconMessage /> : <IconTimer size={12} />}</em>}
+    <strong>{value}</strong>
+  </span>;
+}
+
+// Task time sits on its own line: a day cell has no room for a third value beside messages and time.
+function TaskLine({ period, label, short, value, title }: { period?: 'work' | 'off'; label: string; short: string; value: string; title: string }) {
+  const hint = `${label} ${title}`;
+  return <span className={styles.subLine} data-metric="task" data-period={period} title={hint} aria-label={hint}>
+    <em aria-hidden="true">{short}</em>
     <strong>{value}</strong>
   </span>;
 }
@@ -173,10 +187,13 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   const [period, setPeriod] = useState(readStoredTimeUsagePeriod);
   const [sort, setSort] = useState<TimeUsageSort>(() => periodColumn(period));
   const [descending, setDescending] = useState(true);
+  const [taskIdle, setTaskIdle] = useState(readStoredTaskIdleMinutes);
+  const [taskTimeEnabled] = useState(readStoredTaskTimeEnabled);
   const summaryColumns = period === 'all' ? SUMMARY_COLUMNS : [periodColumn(period)];
   const showWork = period !== 'off';
   const showOff = period !== 'work';
   useEffect(() => writeStoredTimeUsagePeriod(period), [period]);
+  useEffect(() => writeStoredTaskIdleMinutes(taskIdle), [taskIdle]);
   // The usage API uses statistical-day labels in the project time zone. Before
   // the work start, the current statistical day is yesterday even though the
   // calendar date has already changed. Use the default start and the browser
@@ -228,7 +245,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   }, [rangeWasStored, refreshToken]);
   const scheduleReady = workHoursReady && workHoursLoadedForRefresh === refreshToken;
   const rangeValid = scheduleReady && validTimeUsageDates(range.start, range.end, today);
-  const { data, loading, error } = useAPIKeyTimeUsage({ ...range, apiKeyId }, rangeValid, `${refreshToken}:${refresh}`, onAuthRequired);
+  const { data, loading, error } = useAPIKeyTimeUsage({ ...range, apiKeyId, taskIdleMinutes: taskIdle, taskTimeEnabled }, rangeValid, `${refreshToken}:${refresh}`, onAuthRequired);
   // The server clamps an end date that is already the next calendar date but still the current statistical day.
   // Show that clamped date without issuing another request.
   const visibleEnd = data && data.start_date === range.start && data.end_date < range.end ? data.end_date : range.end;
@@ -297,7 +314,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   const errorKey = error instanceof ApiError
     ? error.status === 400 ? 'invalid_range' : error.status === 403 ? 'forbidden' : error.status === 404 ? 'key_missing' : 'error'
     : 'error';
-  const rule = data ? text('day_note', { timezone: data.timezone, start: data.daytime_start, end: data.daytime_end }) : '';
+  const rule = data ? text(taskTimeEnabled ? 'day_note_tasks' : 'day_note', { timezone: data.timezone, start: data.daytime_start, end: data.daytime_end, idle: data.task_idle_minutes ?? taskIdle }) : '';
   // Usage from keys that were never synced is not part of any row, so the total row
   // stays the sum of the table; say how much was left out instead of hiding it.
   const unattributed = data?.unattributed;
@@ -319,7 +336,8 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
     const messageCount = period === 'work' ? (row.daytime_message_count ?? 0) : period === 'off' ? (row.after_hours_message_count ?? 0) : countOf(row);
     const durationMs = period === 'work' ? latencyOf(row, 'work') : period === 'off' ? latencyOf(row, 'off') : latencyOf(row, 'work') + latencyOf(row, 'off');
     const samples = period === 'work' ? samplesOf(row, 'work') : period === 'off' ? samplesOf(row, 'off') : samplesOf(row, 'work') + samplesOf(row, 'off');
-    const quiet = value <= 0 && messageCount <= 0 && durationMs <= 0;
+    const taskMs = period ? taskOf(row, period) : taskOf(row, 'work') + taskOf(row, 'off');
+    const quiet = value <= 0 && messageCount <= 0 && durationMs <= 0 && (!taskTimeEnabled || taskMs <= 0);
     return <div className={styles.summaryStack} data-period={period} data-empty={quiet ? 'true' : undefined}>
       <Amount value={value} period={period} format={tokens} exact={exact(value)} label={period ? text(column) : undefined} figure="tokens" />
       {column === 'total_tokens' && <SplitBar work={row.daytime_tokens} off={row.after_hours_tokens} />}
@@ -328,6 +346,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
         <span className={styles.metaDot} aria-hidden="true">·</span>
         <SubLine plain metric="duration" period={period} label={text('request_duration')} value={cellDuration(durationMs)} title={durationTitle(durationMs, samples)} />
       </MetaRow>
+      {taskTimeEnabled && <TaskLine period={period} label={text('task_duration')} short={text('task_short')} value={cellDuration(taskMs)} title={duration(taskMs)} />}
     </div>;
   };
 
@@ -337,7 +356,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
         <div className={styles.titleRow}>
           <div className={styles.titleBlock}>
             <h2 id={headingId}>{text('title')}{data && <span className={styles.count}>{ranked.length}</span>}</h2>
-            <p>{text('subtitle')}</p>
+            <p>{text(taskTimeEnabled ? 'subtitle_tasks' : 'subtitle')}</p>
           </div>
           {data && <div className={styles.schedule}>
             <span><IconTimer size={14} />{text('work_clock', { start: data.daytime_start, end: data.daytime_end })}</span>
@@ -354,6 +373,14 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
               </button>)}
             </div>
           </div>
+          {taskTimeEnabled && <div className={styles.taskIdleFilter} role="group" aria-label={text('task_idle')} title={text('task_idle_hint')}>
+            <span className={styles.filterLabel}>{text('task_idle')}</span>
+            <div className={`${styles.presets} ${styles.taskIdlePresets}`}>
+              {TASK_IDLE_MINUTE_OPTIONS.map(option => <button key={option} type="button" className={styles.preset} data-task-idle={option} aria-pressed={taskIdle === option} onClick={() => setTaskIdle(option)}>
+                {text('task_idle_option', { count: option })}
+              </button>)}
+            </div>
+          </div>}
           <div className={styles.filters}>
             <div className={styles.presets} role="group" aria-label={text('range_label')}>
               {RANGE_PRESETS.map(preset => <button key={preset} type="button" className={styles.preset} data-range-preset={preset} aria-pressed={activePreset === preset} onClick={() => applyPreset(preset)}>{text(presetLabel(preset))}</button>)}
@@ -366,7 +393,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
           </div>
         </div>
         {data && <div className={styles.meta}>
-          <div className={styles.rangeSummary} data-range-summary data-period={period}>
+          <div className={styles.rangeSummary} data-range-summary data-period={period} data-task-time={String(taskTimeEnabled)}>
             <div className={styles.summaryMetric}>
               <span className={styles.summaryLabel}>{text(periodColumn(period))}{period !== 'all' && <span className={styles.metricUnit}>Token</span>}</span>
               <strong className={styles.summaryValue} data-range-tokens title={exact(data.summary[periodColumn(period)])}>{tokens(data.summary[periodColumn(period)])}</strong>
@@ -379,9 +406,17 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
               <span className={styles.summaryLabel}><i className={styles.workSwatch} aria-hidden="true" />{text('work_duration')}</span>
               <strong className={styles.durationValue}>{duration(latencyOf(data.summary, 'work'))}</strong>
             </div>}
+            {taskTimeEnabled && showWork && <div className={styles.summaryMetric} data-range-task="work" title={`${text('work_task')} · ${exact(taskOf(data.summary, 'work'))} ms`}>
+              <span className={styles.summaryLabel}><i className={styles.workSwatch} aria-hidden="true" />{text('work_task')}</span>
+              <strong className={styles.durationValue}>{duration(taskOf(data.summary, 'work'))}</strong>
+            </div>}
             {showOff && <div className={styles.summaryMetric} data-range-duration="off" title={`${text('off_duration')} · ${durationTitle(latencyOf(data.summary, 'off'), samplesOf(data.summary, 'off'))}`}>
               <span className={styles.summaryLabel}><i className={styles.offSwatch} aria-hidden="true" />{text('off_duration')}</span>
               <strong className={styles.durationValue}>{duration(latencyOf(data.summary, 'off'))}</strong>
+            </div>}
+            {taskTimeEnabled && showOff && <div className={styles.summaryMetric} data-range-task="off" title={`${text('off_task')} · ${exact(taskOf(data.summary, 'off'))} ms`}>
+              <span className={styles.summaryLabel}><i className={styles.offSwatch} aria-hidden="true" />{text('off_task')}</span>
+              <strong className={styles.durationValue}>{duration(taskOf(data.summary, 'off'))}</strong>
             </div>}
           </div>
           <div className={styles.metaTop}>
@@ -389,7 +424,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
               {showWork && <span><i className={styles.workSwatch} aria-hidden="true" />{workLabel}</span>}
               {showOff && <span><i className={styles.offSwatch} aria-hidden="true" />{offLabel}</span>}
             </span>
-            <span className={styles.hint}>{period === 'all' ? text('cell_order') : text('cell_order_filtered', { period: period === 'work' ? workLabel : offLabel })}</span>
+            <span className={styles.hint}>{period === 'all' ? text(taskTimeEnabled ? 'cell_order_tasks' : 'cell_order') : text(taskTimeEnabled ? 'cell_order_filtered_tasks' : 'cell_order_filtered', { period: period === 'work' ? workLabel : offLabel })}</span>
             <button type="button" className={styles.rulesToggle} data-rules-toggle aria-expanded={showRules} aria-controls={rulesId} onClick={() => setShowRules(value => !value)}><IconInfo />{text('statistical_rules')}<IconChevron /></button>
           </div>
           <div id={rulesId} className={styles.rulePanel} hidden={!showRules}><p className={styles.rule} data-day-rule>{rule}</p></div>
@@ -437,7 +472,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
               </th>
               {summaryColumns.map((column, index) => <td key={column} className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} data-key-total={totalAttribute(column)} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(row, column)}</td>)}
               {days.map((day, index) => <td key={day.date} data-date={day.date} data-today={day.is_today ? 'true' : undefined} data-weekend={calendarMeta[index]?.weekend ? 'true' : undefined} className={styles.dayCell}>
-                <DayPair day={day} period={period} format={tokens} messages={messages} duration={cellDuration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} />
+                <DayPair day={day} period={period} taskTimeEnabled={taskTimeEnabled} format={tokens} messages={messages} duration={cellDuration} fullDuration={duration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} taskLabel={text('task_duration')} taskShort={text('task_short')} />
               </td>)}
             </tr>;
           })}</tbody>
@@ -445,7 +480,7 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
             <th scope="row" className={styles.nameCol}>{text('total')}</th>
             {summaryColumns.map((column, index) => <td key={column} className={styles.totalCol} data-summary={column} data-summary-end={index === summaryColumns.length - 1 ? 'true' : undefined} data-key-total={totalAttribute(column)} data-stat={column} data-sorted={sort === column ? 'true' : undefined}>{renderSummary(data.summary, column)}</td>)}
             {calendarMeta.map(({ day, weekend }) => <td key={day.date} data-today={day.is_today ? 'true' : undefined} data-weekend={weekend ? 'true' : undefined} className={styles.dayCell}>
-              <DayPair day={day} period={period} format={tokens} messages={messages} duration={cellDuration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} />
+              <DayPair day={day} period={period} taskTimeEnabled={taskTimeEnabled} format={tokens} messages={messages} duration={cellDuration} fullDuration={duration} exact={exact} durationTitle={durationTitle} workLabel={workLabel} offLabel={offLabel} messageLabel={text('message_count')} durationLabel={text('request_duration')} taskLabel={text('task_duration')} taskShort={text('task_short')} />
             </td>)}
           </tr></tfoot>
         </table>
@@ -454,23 +489,28 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
   </section>;
 }
 
-const DayPair = memo(function DayPair({ day, period, format, messages, duration, exact, durationTitle, workLabel, offLabel, messageLabel, durationLabel }: {
+const DayPair = memo(function DayPair({ day, period, taskTimeEnabled, format, messages, duration, fullDuration, exact, durationTitle, workLabel, offLabel, messageLabel, durationLabel, taskLabel, taskShort }: {
   day: TimeUsageDay;
   period: TimeUsagePeriod;
+  taskTimeEnabled: boolean;
   format: (value: number) => string;
   messages: (value: number) => string;
   duration: (value: number) => string;
+  fullDuration: (value: number) => string;
   exact: (value: number) => string;
   durationTitle: (sum: number, samples: number) => string;
   workLabel: string;
   offLabel: string;
   messageLabel: string;
   durationLabel: string;
+  taskLabel: string;
+  taskShort: string;
 }) {
   const band = (period: 'work' | 'off', tokens: number, label: string) => {
     const messageCount = period === 'work' ? (day.daytime_message_count ?? 0) : (day.after_hours_message_count ?? 0);
     const durationMs = latencyOf(day, period);
-    const quiet = tokens <= 0 && messageCount <= 0 && durationMs <= 0;
+    const taskMs = taskOf(day, period);
+    const quiet = tokens <= 0 && messageCount <= 0 && durationMs <= 0 && (!taskTimeEnabled || taskMs <= 0);
     return <div className={styles.band} data-period={period} data-empty={quiet ? 'true' : undefined}>
       <Amount value={tokens} period={period} format={format} exact={exact(tokens)} label={label} figure="tokens" />
       <MetaRow>
@@ -478,6 +518,7 @@ const DayPair = memo(function DayPair({ day, period, format, messages, duration,
         <span className={styles.metaDot} aria-hidden="true">·</span>
         <SubLine plain metric="duration" period={period} label={durationLabel} value={duration(durationMs)} title={durationTitle(durationMs, samplesOf(day, period))} />
       </MetaRow>
+      {taskTimeEnabled && <TaskLine period={period} label={taskLabel} short={taskShort} value={duration(taskMs)} title={fullDuration(taskMs)} />}
     </div>;
   };
   return <div className={styles.pair}>

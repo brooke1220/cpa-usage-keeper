@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -304,6 +305,115 @@ func TestAPIKeyTimeUsageTreatsNextDateAsCurrentStatisticalDay(t *testing.T) {
 	} {
 		if _, err := provider.GetAPIKeyTimeUsage(context.Background(), query); err != service.ErrInvalidAPIKeyTimeUsageQuery {
 			t.Fatalf("expected %+v to be rejected, got %v", query, err)
+		}
+	}
+}
+
+// Back-to-back one-minute requests tile the timeline, so task time must land in exactly the same
+// day and period as cumulative time, including on a DST day whose 02:30 work start does not exist.
+func TestAPIKeyTimeUsageTaskTimeMatchesLatencyLabelsAcrossDST(t *testing.T) {
+	db := openUsageServiceTestDatabase(t)
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load America/New_York: %v", err)
+	}
+	key := entities.CPAAPIKey{APIKey: "sk-time-usage-task-dst"}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatal(err)
+	}
+	first := time.Date(2026, 3, 7, 0, 0, 0, 0, location)
+	last := time.Date(2026, 3, 10, 6, 0, 0, 0, location)
+	events := make([]entities.UsageEvent, 0, 4700)
+	for at := first; at.Before(last); at = at.Add(time.Minute) {
+		events = append(events, entities.UsageEvent{EventKey: "dst-" + at.UTC().Format(time.RFC3339), APIGroupKey: key.APIKey, SessionID: "dst", Timestamp: at, LatencyMS: 60_000, TotalTokens: 1})
+	}
+	if err := db.CreateInBatches(&events, 500).Error; err != nil {
+		t.Fatal(err)
+	}
+	provider, err := service.NewAPIKeyTimeUsageService(db, service.APIKeyTimeUsageOptions{
+		Now: func() time.Time { return time.Date(2026, 3, 10, 20, 0, 0, 0, location) }, WorkStart: "02:30", WorkEnd: "12:00", Location: location,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := provider.GetAPIKeyTimeUsage(context.Background(), dto.APIKeyTimeUsageQuery{TaskTimeEnabled: "true", StartDate: "2026-03-07", EndDate: "2026-03-09"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The day boundary moves to the jump instant, so 03-07 and 03-08 are both 23.5 hours.
+	wantHours := []float64{23.5, 23.5, 24}
+	for index, day := range report.Daily {
+		if day.DaytimeTaskMS != day.DaytimeLatencyMS || day.AfterHoursTaskMS != day.AfterHoursLatencyMS {
+			t.Fatalf("%s: task %d/%d ms, latency %d/%d ms", day.Date, day.DaytimeTaskMS, day.AfterHoursTaskMS, day.DaytimeLatencyMS, day.AfterHoursLatencyMS)
+		}
+		if total := day.DaytimeTaskMS + day.AfterHoursTaskMS; total != int64(wantHours[index]*3_600_000) {
+			t.Fatalf("%s: task total %d ms, want %.1f h", day.Date, total, wantHours[index])
+		}
+	}
+	single, err := provider.GetAPIKeyTimeUsage(context.Background(), dto.APIKeyTimeUsageQuery{TaskTimeEnabled: "true", StartDate: "2026-03-07", EndDate: "2026-03-09", APIKeyID: strconv.FormatInt(key.ID, 10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if single.Summary.DaytimeTaskMS != report.Summary.DaytimeTaskMS || single.Summary.AfterHoursTaskMS != report.Summary.AfterHoursTaskMS {
+		t.Fatalf("selected key task totals differ: %+v vs %+v", single.Summary.APIKeyTimeUsageTotals, report.Summary.APIKeyTimeUsageTotals)
+	}
+}
+
+func TestAPIKeyTimeUsageEstimatesTaskDurationFromSessionGaps(t *testing.T) {
+	db := openUsageServiceTestDatabase(t)
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	key := entities.CPAAPIKey{APIKey: "sk-time-usage-task"}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatal(err)
+	}
+	at := func(hour, minute int) time.Time { return time.Date(2026, 10, 8, hour, minute, 0, 0, location) }
+	parent := "task-root"
+	warmup := false
+	events := []entities.UsageEvent{
+		{EventKey: "root-1", APIGroupKey: key.APIKey, SessionID: "task-root", Timestamp: at(10, 0), LatencyMS: 60_000},
+		// A 4-minute gap is a local script run inside the same task.
+		{EventKey: "root-2", APIGroupKey: key.APIKey, SessionID: "task-root", Timestamp: at(10, 5), LatencyMS: 60_000},
+		// The subagent overlaps its parent; the overlap counts once.
+		{EventKey: "child", APIGroupKey: key.APIKey, SessionID: "task-child", ParentSessionID: &parent, Timestamp: at(10, 5), LatencyMS: 120_000},
+		// Warmups are not messages and must not bridge the 23-minute gap below.
+		{EventKey: "warmup", APIGroupKey: key.APIKey, SessionID: "task-root", Generate: &warmup, Timestamp: at(10, 20), LatencyMS: 1_000},
+		{EventKey: "root-3", APIGroupKey: key.APIKey, SessionID: "task-root", Timestamp: at(10, 30), LatencyMS: 60_000, Failed: true},
+		{EventKey: "evening", APIGroupKey: key.APIKey, SessionID: "evening", Timestamp: at(19, 0), LatencyMS: 30_000},
+		{EventKey: "unsynced", APIGroupKey: "sk-never-synced", SessionID: "other", Timestamp: at(11, 0), LatencyMS: 45_000},
+	}
+	if err := db.Create(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	provider, err := service.NewAPIKeyTimeUsageService(db, service.APIKeyTimeUsageOptions{
+		Now: func() time.Time { return time.Date(2026, 10, 9, 20, 0, 0, 0, location) }, WorkStart: "09:00", WorkEnd: "18:00", Location: location,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := provider.GetAPIKeyTimeUsage(context.Background(), dto.APIKeyTimeUsageQuery{TaskTimeEnabled: "true", StartDate: "2026-10-08", EndDate: "2026-10-08"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10:00–10:07 bridged, then 10:30–10:31 after a break.
+	if report.TaskIdleMinutes != 10 || report.Summary.DaytimeTaskMS != 8*60_000 || report.Summary.AfterHoursTaskMS != 30_000 {
+		t.Fatalf("unexpected default task totals: idle=%d %+v", report.TaskIdleMinutes, report.Summary.APIKeyTimeUsageTotals)
+	}
+	if len(report.KeySummaries) != 1 || report.KeySummaries[0].Daily[0].DaytimeTaskMS != 8*60_000 {
+		t.Fatalf("unexpected key task totals: %+v", report.KeySummaries)
+	}
+	if report.Unattributed.DaytimeTaskMS != 45_000 {
+		t.Fatalf("unsynced key task time should stay out of the summary: %+v", report.Unattributed)
+	}
+	report, err = provider.GetAPIKeyTimeUsage(context.Background(), dto.APIKeyTimeUsageQuery{TaskTimeEnabled: "true", StartDate: "2026-10-08", EndDate: "2026-10-08", TaskIdleMinutes: "30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.TaskIdleMinutes != 30 || report.Summary.DaytimeTaskMS != 31*60_000 {
+		t.Fatalf("unexpected 30-minute task totals: idle=%d %+v", report.TaskIdleMinutes, report.Summary.APIKeyTimeUsageTotals)
+	}
+	for _, idle := range []string{"15", "abc", "010", "-10"} {
+		if _, err := provider.GetAPIKeyTimeUsage(context.Background(), dto.APIKeyTimeUsageQuery{TaskTimeEnabled: "true", StartDate: "2026-10-08", EndDate: "2026-10-08", TaskIdleMinutes: idle}); err != service.ErrInvalidAPIKeyTimeUsageQuery {
+			t.Fatalf("expected idle %q to be rejected, got %v", idle, err)
 		}
 	}
 }

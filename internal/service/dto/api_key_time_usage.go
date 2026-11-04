@@ -6,6 +6,10 @@ type APIKeyTimeUsageQuery struct {
 	StartDate string
 	EndDate   string
 	APIKeyID  string
+	// TaskTimeEnabled is opt-in: only "true" enables session task aggregation.
+	TaskTimeEnabled string
+	// TaskIdleMinutes is the raw query value; empty selects the default.
+	TaskIdleMinutes string
 }
 
 type APIKeyTimeUsageKey struct {
@@ -28,6 +32,10 @@ type APIKeyTimeUsageTotals struct {
 	AfterHoursLatencyMS      int64 `json:"after_hours_latency_ms"`
 	DaytimeLatencySamples    int64 `json:"daytime_latency_samples"`
 	AfterHoursLatencySamples int64 `json:"after_hours_latency_samples"`
+	// DaytimeTaskMS and AfterHoursTaskMS estimate task wall time: request time plus
+	// idle gaps no longer than TaskIdleMinutes between requests of the same task.
+	DaytimeTaskMS    int64 `json:"daytime_task_ms"`
+	AfterHoursTaskMS int64 `json:"after_hours_task_ms"`
 }
 
 type APIKeyTimeUsageStats struct {
@@ -52,19 +60,22 @@ type APIKeyTimeUsageKeySummary struct {
 }
 
 type APIKeyTimeUsageReport struct {
-	Timezone     string               `json:"timezone"`
-	DaytimeStart string               `json:"daytime_start"`
-	DaytimeEnd   string               `json:"daytime_end"`
-	StartDate    string               `json:"start_date"`
-	EndDate      string               `json:"end_date"`
-	MinDate      string               `json:"min_date"`
-	MaxDate      string               `json:"max_date"`
-	APIKeyID     string               `json:"api_key_id,omitempty"`
-	GeneratedAt  time.Time            `json:"generated_at"`
-	CompleteDays int                  `json:"complete_days"`
-	HasRecords   bool                 `json:"has_records"`
-	Keys         []APIKeyTimeUsageKey `json:"keys"`
-	Summary      APIKeyTimeUsageStats `json:"summary"`
+	Timezone        string `json:"timezone"`
+	DaytimeStart    string `json:"daytime_start"`
+	DaytimeEnd      string `json:"daytime_end"`
+	StartDate       string `json:"start_date"`
+	EndDate         string `json:"end_date"`
+	MinDate         string `json:"min_date"`
+	MaxDate         string `json:"max_date"`
+	APIKeyID        string `json:"api_key_id,omitempty"`
+	TaskTimeEnabled bool   `json:"task_time_enabled"`
+	// TaskIdleMinutes is the idle gap used for the task-duration fields.
+	TaskIdleMinutes int                  `json:"task_idle_minutes"`
+	GeneratedAt     time.Time            `json:"generated_at"`
+	CompleteDays    int                  `json:"complete_days"`
+	HasRecords      bool                 `json:"has_records"`
+	Keys            []APIKeyTimeUsageKey `json:"keys"`
+	Summary         APIKeyTimeUsageStats `json:"summary"`
 	// Unattributed is usage whose API key was never synced to Keeper; it is not part of Summary.
 	Unattributed APIKeyTimeUsageTotals       `json:"unattributed"`
 	Daily        []APIKeyTimeUsageDaily      `json:"daily"`

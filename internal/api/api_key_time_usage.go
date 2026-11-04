@@ -18,13 +18,15 @@ func registerAPIKeyTimeUsageRoute(router gin.IRoutes, provider service.APIKeyTim
 		}
 		query := c.Request.URL.Query()
 		for name, values := range query {
-			if (name != "start_date" && name != "end_date" && name != "api_key_id") || len(values) != 1 {
+			if (name != "start_date" && name != "end_date" && name != "api_key_id" && name != "task_idle_minutes" && name != "task_time_enabled") || len(values) != 1 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": service.ErrInvalidAPIKeyTimeUsageQuery.Error()})
 				return
 			}
 		}
 		report, err := provider.GetAPIKeyTimeUsage(c.Request.Context(), dto.APIKeyTimeUsageQuery{
 			StartDate: query.Get("start_date"), EndDate: query.Get("end_date"), APIKeyID: query.Get("api_key_id"),
+			TaskIdleMinutes: query.Get("task_idle_minutes"),
+			TaskTimeEnabled: query.Get("task_time_enabled"),
 		})
 		switch {
 		case errors.Is(err, service.ErrInvalidAPIKeyTimeUsageQuery):
