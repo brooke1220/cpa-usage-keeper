@@ -138,6 +138,14 @@ function MetaRow({ children }: { children: ReactNode }) {
   return <span className={styles.metaRow}>{children}</span>;
 }
 
+function TokenRow({ message, children }: { message?: ReactNode; children: ReactNode }) {
+  return message ? <span className={styles.tokenRow} data-token-row>
+    {message}
+    <span className={styles.metaDot} aria-hidden="true">·</span>
+    {children}
+  </span> : children;
+}
+
 function SplitBar({ work, off, compact = false }: { work: number; off: number; compact?: boolean }) {
   const total = work + off;
   const share = (value: number) => `${value / total * 100}%`;
@@ -326,12 +334,17 @@ export function APIKeyTimeUsagePage({ apiKeyId = '', refreshToken = 0, onAuthReq
     const samples = period === 'work' ? samplesOf(row, 'work') : period === 'off' ? samplesOf(row, 'off') : samplesOf(row, 'work') + samplesOf(row, 'off');
     const taskMs = period ? taskOf(row, period) : taskOf(row, 'work') + taskOf(row, 'off');
     const quiet = value <= 0 && messageCount <= 0 && durationMs <= 0 && (!taskTimeEnabled || taskMs <= 0);
+    const message = <SubLine plain metric="messages" period={period} label={text('message_count')} value={messages(messageCount)} title={exact(messageCount)} />;
     return <div className={styles.summaryStack} data-period={period} data-empty={quiet ? 'true' : undefined}>
-      <Amount value={value} period={period} format={tokens} exact={exact(value)} label={period ? text(column) : undefined} figure="tokens" />
+      <TokenRow message={taskTimeEnabled ? message : undefined}>
+        <Amount value={value} period={period} format={tokens} exact={exact(value)} label={period ? text(column) : undefined} figure="tokens" />
+      </TokenRow>
       {column === 'total_tokens' && <SplitBar work={row.daytime_tokens} off={row.after_hours_tokens} />}
       <MetaRow>
-        <SubLine plain metric="messages" period={period} label={text('message_count')} value={messages(messageCount)} title={exact(messageCount)} />
-        <span className={styles.metaDot} aria-hidden="true">·</span>
+        {!taskTimeEnabled && <>
+          {message}
+          <span className={styles.metaDot} aria-hidden="true">·</span>
+        </>}
         <SubLine plain metric="duration" period={period} label={text('request_duration')} value={cellDuration(durationMs)} title={durationTitle(durationMs, samples)} />
         {taskTimeEnabled && <>
           <span className={styles.metaDot} aria-hidden="true">·</span>
@@ -493,11 +506,16 @@ const DayPair = memo(function DayPair({ day, period, taskTimeEnabled, format, me
     const durationMs = latencyOf(day, period);
     const taskMs = taskOf(day, period);
     const quiet = tokens <= 0 && messageCount <= 0 && durationMs <= 0 && (!taskTimeEnabled || taskMs <= 0);
+    const message = <SubLine plain metric="messages" period={period} label={messageLabel} value={messages(messageCount)} title={exact(messageCount)} />;
     return <div className={styles.band} data-period={period} data-empty={quiet ? 'true' : undefined}>
-      <Amount value={tokens} period={period} format={format} exact={exact(tokens)} label={label} figure="tokens" />
+      <TokenRow message={taskTimeEnabled ? message : undefined}>
+        <Amount value={tokens} period={period} format={format} exact={exact(tokens)} label={label} figure="tokens" />
+      </TokenRow>
       <MetaRow>
-        <SubLine plain metric="messages" period={period} label={messageLabel} value={messages(messageCount)} title={exact(messageCount)} />
-        <span className={styles.metaDot} aria-hidden="true">·</span>
+        {!taskTimeEnabled && <>
+          {message}
+          <span className={styles.metaDot} aria-hidden="true">·</span>
+        </>}
         <SubLine plain metric="duration" period={period} label={durationLabel} value={duration(durationMs)} title={durationTitle(durationMs, samplesOf(day, period))} />
         {taskTimeEnabled && <>
           <span className={styles.metaDot} aria-hidden="true">·</span>

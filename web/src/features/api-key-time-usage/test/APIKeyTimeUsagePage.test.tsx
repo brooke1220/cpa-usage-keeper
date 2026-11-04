@@ -61,6 +61,9 @@ describe('API Key time usage page', () => {
     expect(api).toHaveBeenCalledWith(weekQuery, expect.any(AbortSignal));
     expect(container.querySelector('[data-task-time-toggle]')).toBeNull();
     expect(container.querySelector('[data-metric="task"], [data-range-task], [data-task-idle]')).toBeNull();
+    expect(container.querySelector('[data-token-row]')).toBeNull();
+    const message = container.querySelector('[data-daily-ledger] [data-metric="messages"]')!;
+    expect([...message.parentElement!.querySelectorAll('[data-metric]')].map(node => node.getAttribute('data-metric'))).toEqual(['messages', 'duration']);
     expect(container.querySelector('[data-range-summary]')?.children).toHaveLength(4);
     expect(container.querySelector('[data-range-summary]')?.getAttribute('data-task-time')).toBe('false');
     expect(container.querySelector('[data-day-rule]')?.textContent).toContain('api_key_time_usage.day_note:');
@@ -254,7 +257,7 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('tbody tr')?.getAttribute('data-time-usage-key')).toBe('2');
   });
 
-  it('appends unlabeled task time to the same metadata row and keeps the full hover hint', async () => {
+  it('moves messages beside tokens and keeps both unlabeled durations below with hover hints', async () => {
     localStorage.setItem(TIME_USAGE_TASK_TIME_STORAGE_KEY, 'true');
     await act(async () => root.render(<APIKeyTimeUsagePage />));
     expect([...container.querySelectorAll('[data-range-summary] > [data-range-duration], [data-range-summary] > [data-range-task]')]
@@ -267,8 +270,11 @@ describe('API Key time usage page', () => {
     expect(container.querySelector('[data-time-usage-key="1"] [data-date="2026-10-01"] [data-metric="task"][data-period="work"]')).not.toBeNull();
     for (const task of container.querySelectorAll<HTMLElement>('[data-daily-ledger] [data-metric="task"]')) {
       const metrics = [...task.parentElement!.querySelectorAll('[data-metric]')].map(node => node.getAttribute('data-metric'));
-      expect(metrics).toEqual(['messages', 'duration', 'task']);
+      expect(metrics).toEqual(['duration', 'task']);
       expect(task.parentElement!.lastElementChild).toBe(task);
+      const tokenRow = task.parentElement!.parentElement!.querySelector('[data-token-row]')!;
+      expect([...tokenRow.children].map(node => node.getAttribute('data-metric') ?? node.getAttribute('data-figure'))).toEqual(['messages', null, 'tokens']);
+      expect(tokenRow.querySelector('[data-metric="messages"]')?.getAttribute('title')).toContain('api_key_time_usage.message_count');
       expect(task.textContent).toBe(task.querySelector('strong')?.textContent);
       expect(task.querySelector('em')).toBeNull();
       expect(task.title).toContain('api_key_time_usage.task_duration');

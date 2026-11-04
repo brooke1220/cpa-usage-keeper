@@ -798,8 +798,8 @@ thead .totalCol[aria-sort='descending'] .sortMark {
   overflow: hidden;
 }
 
-.summaryStack > [data-figure='tokens'],
-.band > [data-figure='tokens'] {
+.summaryStack [data-figure='tokens'],
+.band [data-figure='tokens'] {
   display: block;
   width: 100%;
   min-height: 18px;
@@ -809,16 +809,29 @@ thead .totalCol[aria-sort='descending'] .sortMark {
   letter-spacing: -0.02em;
 }
 
-.summaryStack > [data-figure='tokens'] {
+.summaryStack [data-figure='tokens'] {
   min-height: 20px;
   font-size: 16px;
   font-weight: 700;
   line-height: 20px;
 }
 
-.band > [data-figure='tokens'] {
+.band [data-figure='tokens'] {
   font-size: 13px;
   font-weight: 700;
+}
+
+.tokenRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+
+  [data-figure='tokens'] {
+    flex: 0 0 auto;
+    width: auto;
+  }
 }
 
 .totalNum { color: var(--text-primary); }
@@ -827,8 +840,8 @@ thead .totalCol[aria-sort='descending'] .sortMark {
 .offNum { color: var(--usage-off); }
 
 .zero,
-.summaryStack > [data-figure='tokens'].zero,
-.band[data-empty='true'] > [data-figure='tokens'] {
+.summaryStack [data-figure='tokens'].zero,
+.band[data-empty='true'] [data-figure='tokens'] {
   color: var(--text-secondary);
   font-weight: 600;
 }
