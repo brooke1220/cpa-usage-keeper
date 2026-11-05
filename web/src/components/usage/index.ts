@@ -3,6 +3,7 @@ export { DailyAverageCard } from './DailyAverageCard';
 export { OverviewRealtimePanel } from './OverviewRealtimePanel';
 export { AnalysisPanel } from './analysis';
 export { ApiKeySettingsCard } from './ApiKeySettingsCard';
+export { HiddenApiKeysSettingsCard } from './HiddenApiKeysSettingsCard';
 export { WorkHoursSettingsCard } from './WorkHoursSettingsCard';
 export { TaskTimeSettingsCard } from './TaskTimeSettingsCard';
 export { SessionSettingsCard } from './SessionSettingsCard';

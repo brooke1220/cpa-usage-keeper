@@ -140,6 +140,10 @@ func (s *apiKeyTimeUsageService) GetAPIKeyTimeUsage(ctx context.Context, query d
 	if err != nil {
 		return nil, err
 	}
+	hidden, err := repository.LoadHiddenAPIKeyIDs(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
 	if taskTimeEnabled {
 		// Cache compact totals for all keys and idle options; key selection is applied
 		// below, after resolving the complete retained session ancestry.
@@ -190,6 +194,10 @@ func (s *apiKeyTimeUsageService) GetAPIKeyTimeUsage(ctx context.Context, query d
 	for _, key := range keys {
 		if key.ID == selectedID {
 			found = true
+		}
+		// 设置页隐藏的 Key 不进入列表和合计；直接选中时返回空结果，而不是 404。
+		if _, ok := hidden[key.ID]; ok {
+			continue
 		}
 		if key.IsDeleted && !hasUsage[key.ID] && key.ID != selectedID {
 			continue

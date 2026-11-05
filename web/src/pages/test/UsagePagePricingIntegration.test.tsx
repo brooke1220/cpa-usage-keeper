@@ -35,6 +35,7 @@ vi.mock('@/lib/api', async (original) => ({
   fetchUsageEventModelFilterOptions: async () => ({ models: [] }),
   fetchUsageEventSourceFilterOptions: async () => ({ sources: [] }),
   fetchCpaApiKeySettings: async () => ({ items: [] }),
+  fetchHiddenCpaApiKeyIds: async () => ({ ids: [] }),
   fetchAuthSessions: async () => ({ sessions: [] }),
 }))
 

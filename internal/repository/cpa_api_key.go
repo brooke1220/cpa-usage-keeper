@@ -157,6 +157,13 @@ func ListActiveCPAAPIKeys(db *gorm.DB) ([]entities.CPAAPIKey, error) {
 	return rows, err
 }
 
+// ListDeletedCPAAPIKeys 返回已从 CPA 删除的 Key；它们的历史用量仍会出现在用量和排行页。
+func ListDeletedCPAAPIKeys(db *gorm.DB) ([]entities.CPAAPIKey, error) {
+	var rows []entities.CPAAPIKey
+	err := db.Where("is_deleted = ?", true).Order("id asc").Find(&rows).Error
+	return rows, err
+}
+
 func FindActiveCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) {
 	var row entities.CPAAPIKey
 	err := db.Where("id = ? AND is_deleted = ?", id, false).First(&row).Error

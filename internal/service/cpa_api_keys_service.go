@@ -37,6 +37,14 @@ type CPAAPIKeyAliasImporter interface {
 	ImportCPAAPIKeyAliases(ctx context.Context, aliases []entities.CPAAPIKeyAlias, mode CPAAPIKeyAliasImportMode) ([]entities.CPAAPIKey, error)
 }
 
+// CPAAPIKeyHiddenSettings 管理在用量和排行页隐藏的 Key；可选接口，只读 provider 不受影响。
+type CPAAPIKeyHiddenSettings interface {
+	ListHiddenCPAAPIKeyIDs(ctx context.Context) ([]int64, error)
+	UpdateHiddenCPAAPIKeyIDs(ctx context.Context, ids []int64) ([]int64, error)
+	// ListDeletedCPAAPIKeys 供设置页列出已删除但仍有历史用量的 Key，使它们也能被隐藏。
+	ListDeletedCPAAPIKeys(ctx context.Context) ([]entities.CPAAPIKey, error)
+}
+
 type cpaAPIKeyService struct {
 	db *gorm.DB
 }
@@ -75,6 +83,18 @@ func (s *cpaAPIKeyService) UpdateCPAAPIKeyAlias(_ context.Context, id int64, key
 		return entities.CPAAPIKey{}, err
 	}
 	return repository.FindActiveCPAAPIKeyByID(s.db.Clauses(dbresolver.Write), id)
+}
+
+func (s *cpaAPIKeyService) ListHiddenCPAAPIKeyIDs(ctx context.Context) ([]int64, error) {
+	return repository.ListHiddenAPIKeyIDs(ctx, s.db)
+}
+
+func (s *cpaAPIKeyService) UpdateHiddenCPAAPIKeyIDs(ctx context.Context, ids []int64) ([]int64, error) {
+	return repository.SaveHiddenAPIKeyIDs(ctx, s.db.Clauses(dbresolver.Write), ids)
+}
+
+func (s *cpaAPIKeyService) ListDeletedCPAAPIKeys(ctx context.Context) ([]entities.CPAAPIKey, error) {
+	return repository.ListDeletedCPAAPIKeys(s.db.WithContext(ctx))
 }
 
 func (s *cpaAPIKeyService) ImportCPAAPIKeyAliases(ctx context.Context, aliases []entities.CPAAPIKeyAlias, mode CPAAPIKeyAliasImportMode) ([]entities.CPAAPIKey, error) {

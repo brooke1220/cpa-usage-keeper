@@ -184,3 +184,11 @@ git diff --check
 - 新增 `20261104_api_key_task_parent_indexes` 迁移，在现有迁移末尾追加 hot / archive 的父子关系部分索引；只索引携带父会话的事件，不改历史事件、排行表、手工别名或头像。归档表现在仅额外保留这一项部分索引。
 - 任务请求按时间流式合并，同时计算四档中断间隔；只缓存有上限的日汇总。新事件、归档变化、Key 登记或工作时段变化触发重算，首次读取和数据变化后的读取仍需要扫描所选范围内的请求。
 - 回归依据为 `internal/service/test/api_key_task_consistency_test.go`、`internal/apikeytime/test/tasks_test.go` 和 `internal/repository/migration/test/api_key_task_parent_indexes_test.go`；百万事件的首次／缓存查询可用 `BenchmarkAPIKeyTaskReportMillion` 重测。
+
+## 2026-11-04 设置页隐藏 API Key
+
+- 用户要求：在设置页多选 API Key，被选中的 Key 不在“排行”和“用量”（`/api-key-usage`）页显示。概览、分析、实时和请求事件页不受影响。
+- 设置保存在 `app_settings` 的 `usage.hidden_api_key_ids`（ID 的 JSON 数组），不新增迁移。接口为管理员保护下的 `GET`／`PUT /api/v1/usage/api-keys/hidden`，保存时只保留 `cpa_api_keys` 中存在的 ID。读取接口另外返回已从 CPA 删除的 Key（仅脱敏展示信息），设置卡片把它们单独分组，使仍有历史用量的已删除 Key 也能隐藏。
+- 排行只在 `LocalRankingService.Leaderboard` 读取时排除隐藏 Key：后台聚合和快照不变，取消隐藏后立即恢复；先排除再计算，综合分归一化样本不包含隐藏 Key，其余 Key 依次补位。合并时不要把过滤移到聚合阶段，否则取消隐藏后需要等新快照，历史完整日也无法恢复。
+- 用量页在 `GetAPIKeyTimeUsage` 中跳过隐藏 Key：不出现在列表、明细和合计中，也不转入“未归属”用量；筛选框残留选中隐藏 Key 时返回空结果，不返回 404。
+- 回归依据为 `internal/ranking/test/local_hidden_keys_test.go`、`internal/service/test/api_key_time_usage_hidden_test.go`、`internal/api/test/hidden_api_keys_test.go` 和 `web/src/components/usage/test/HiddenApiKeysSettingsCard.test.tsx`。

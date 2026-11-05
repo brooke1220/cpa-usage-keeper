@@ -61,6 +61,25 @@ type updateCPAAPIKeyAliasRequest struct {
 	KeyAlias string `json:"keyAlias"`
 }
 
+// hiddenCPAAPIKeysPayload 与其他 Key 接口一致，ID 以字符串传输。
+type hiddenCPAAPIKeysPayload struct {
+	IDs []string `json:"ids"`
+}
+
+// hiddenCPAAPIKeysListResponse 附带已删除的 Key（只含脱敏展示信息），设置页才能隐藏它们的历史用量。
+type hiddenCPAAPIKeysListResponse struct {
+	hiddenCPAAPIKeysPayload
+	DeletedKeys []cpaAPIKeyResponse `json:"deletedKeys"`
+}
+
+func toHiddenCPAAPIKeysResponse(ids []int64) hiddenCPAAPIKeysPayload {
+	response := hiddenCPAAPIKeysPayload{IDs: make([]string, 0, len(ids))}
+	for _, id := range ids {
+		response.IDs = append(response.IDs, strconv.FormatInt(id, 10))
+	}
+	return response
+}
+
 func registerCPAAPIKeyRoutes(router gin.IRoutes, provider service.CPAAPIKeyProvider, usageProvider service.UsageProvider) {
 	router.GET("/usage/api-keys", func(c *gin.Context) {
 		rows, err := listCPAAPIKeyRows(c, provider)
@@ -156,6 +175,64 @@ func registerCPAAPIKeyRoutes(router gin.IRoutes, provider service.CPAAPIKeyProvi
 			items = append(items, toCPAAPIKeyResponse(row))
 		}
 		c.JSON(http.StatusOK, cpaAPIKeyListResponse{Items: items})
+	})
+
+	router.GET("/usage/api-keys/hidden", func(c *gin.Context) {
+		setNoStoreHeaders(c)
+		settings, ok := provider.(service.CPAAPIKeyHiddenSettings)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "hidden api key settings are not configured"})
+			return
+		}
+		ids, err := settings.ListHiddenCPAAPIKeyIDs(c.Request.Context())
+		if err != nil {
+			writeInternalError(c, "list hidden api keys failed", err)
+			return
+		}
+		deleted, err := settings.ListDeletedCPAAPIKeys(c.Request.Context())
+		if err != nil {
+			writeInternalError(c, "list deleted api keys failed", err)
+			return
+		}
+		response := hiddenCPAAPIKeysListResponse{hiddenCPAAPIKeysPayload: toHiddenCPAAPIKeysResponse(ids), DeletedKeys: make([]cpaAPIKeyResponse, 0, len(deleted))}
+		for _, row := range deleted {
+			response.DeletedKeys = append(response.DeletedKeys, toCPAAPIKeyResponse(row))
+		}
+		c.JSON(http.StatusOK, response)
+	})
+
+	router.PUT("/usage/api-keys/hidden", func(c *gin.Context) {
+		setNoStoreHeaders(c)
+		settings, ok := provider.(service.CPAAPIKeyHiddenSettings)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "hidden api key settings are not configured"})
+			return
+		}
+		var request hiddenCPAAPIKeysPayload
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		if err := c.ShouldBindJSON(&request); err != nil || request.IDs == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		if len(request.IDs) > maxCPAAPIKeyAliasImportItems {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid hidden api key count"})
+			return
+		}
+		ids := make([]int64, 0, len(request.IDs))
+		for _, value := range request.IDs {
+			id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid api key id"})
+				return
+			}
+			ids = append(ids, id)
+		}
+		saved, err := settings.UpdateHiddenCPAAPIKeyIDs(c.Request.Context(), ids)
+		if err != nil {
+			writeInternalError(c, "save hidden api keys failed", err)
+			return
+		}
+		c.JSON(http.StatusOK, toHiddenCPAAPIKeysResponse(saved))
 	})
 
 	router.PATCH("/usage/api-keys/:id", func(c *gin.Context) {

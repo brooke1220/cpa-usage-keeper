@@ -418,6 +418,18 @@ func (s *LocalRankingService) Leaderboard(ctx context.Context, period Leaderboar
 	if err != nil {
 		return Leaderboard{}, err
 	}
+	// 设置页隐藏的 Key 仍正常聚合快照，只在读取时排除，取消隐藏后立即恢复；
+	// 先排除再计算，综合分的归一化样本也不包含隐藏 Key。
+	hidden, err := repository.LoadHiddenAPIKeyIDs(ctx, s.db.Clauses(dbresolver.Read))
+	if err != nil {
+		return Leaderboard{}, err
+	}
+	if len(hidden) > 0 {
+		rows = slices.DeleteFunc(rows, func(row localRankingPopulationRow) bool {
+			_, ok := hidden[row.APIKeyID]
+			return ok
+		})
+	}
 	entries := buildLocalLeaderboardEntries(rows, metric)
 	generatedAt := time.Time{}
 	for _, row := range rows {

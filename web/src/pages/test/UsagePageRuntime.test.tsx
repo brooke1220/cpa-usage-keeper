@@ -38,6 +38,7 @@ vi.mock('@/lib/api', async (importOriginal) => ({
   fetchVersion: async () => ({ version: 'test' }),
   fetchCpaApiKeyOptions: async () => ({ options: [] }),
   fetchCpaApiKeySettings: async () => ({ items: [] }),
+  fetchHiddenCpaApiKeyIds: async () => ({ ids: [] }),
   fetchAuthSessions: async () => ({ items: [] }),
   fetchPricingModels: async () => ({ models: [], config_revision: 0 }),
   fetchPricingModelOptions: async () => ({ models: [] }),

@@ -32,6 +32,7 @@ import {
   OverviewRealtimePanel,
   AnalysisPanel,
   ApiKeySettingsCard,
+  HiddenApiKeysSettingsCard,
   WorkHoursSettingsCard,
   TaskTimeSettingsCard,
   SessionSettingsCard,
@@ -2576,6 +2577,13 @@ export function UsagePage({ ingestMode = 'pull', onAuthRequired }: { ingestMode?
                   cpaURL={cpaManagementURL}
                   onImportCPANames={handleImportCPAKeyNames}
                   onSaveAlias={handleSaveApiKeyAlias}
+                  onNotice={showTopNotice}
+                />
+                <HiddenApiKeysSettingsCard
+                  apiKeys={apiKeySettings}
+                  loading={apiKeySettingsLoading}
+                  refreshToken={workHoursRefresh}
+                  onAuthRequired={onAuthRequired}
                   onNotice={showTopNotice}
                 />
                 <PricingSettings ref={pricingSettingsRef} timezone={status?.timezone} onAuthRequired={onAuthRequired}

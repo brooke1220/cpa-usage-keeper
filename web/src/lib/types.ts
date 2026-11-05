@@ -918,6 +918,12 @@ export interface CpaApiKeyOptionsResponse {
   options: CpaApiKeyOption[]
 }
 
+export interface HiddenCpaApiKeysResponse {
+  ids: string[]
+  /** 已从 CPA 删除但仍有历史用量的 Key；只在读取接口返回。 */
+  deletedKeys?: CpaApiKeyDisplayItem[]
+}
+
 export type PricingStyle = 'openai' | 'claude'
 
 // 完整模型配置与后端保存合同一致；条件只携带当前 type 允许的字段。
